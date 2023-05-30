@@ -1,0 +1,31 @@
+{
+  "extends": ["next/core-web-vitals", "airbnb", "plugin:prettier/recommended"],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "rules": {
+    "max-len": ["error", 140],
+    "quotes": [2,"single", {"avoidEscape": true}]
+//    "import/named": "off",
+//    "vue/component-name-in-template-casing": "off",
+//    "no-unreachable-loop": "off",
+//    "no-useless-constructor": "off",
+//    "vue/max-attributes-per-line": "off",
+//    "vue/no-static-inline-styles": "off",
+//    "vue/static-class-names-order": "off",
+//    "vue/html-self-closing": "off",
+//    "vue/attributes-order": "off",
+//    "space-before-function-paren": "off",
+//    "arrow-parens": "off",
+//    // Permitir el uso de puntos y comas adicionales
+//    "no-extra-semi": "off",
+//    // Permitir el uso de comas adicionales al final de objetos y arreglos
+//    "comma-dangle": ["off", "always-multiline"],
+//    // Permitir la omisión de puntos y comas
+//    "semi": "off",
+//    "quotes": ["error", "single"],
+//    "camelcase": "off"
+  }
+}

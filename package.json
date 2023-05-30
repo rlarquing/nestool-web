@@ -2,6 +2,7 @@
   "name": "nestool-web",
   "version": "0.1.0",
   "private": true,
+  "description": "Herramienta web para trabajar con el api-base hecha en nextjs13",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

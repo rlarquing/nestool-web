@@ -1,1 +1,1 @@
-
+export * from './ruta.entity';

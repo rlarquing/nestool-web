@@ -1,0 +1,64 @@
+{
+  "entityName": "Usuario",
+  "esquema": "public",
+  "basePath": "/path/to/your/project",
+  "atributos": [
+    {
+      "nombreAtributo": "nombre",
+      "tipoDato": "string",
+      "length": "100",
+      "nulo": false,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "email",
+      "tipoDato": "string",
+      "length": "255",
+      "nulo": false,
+      "unico": true
+    },
+    {
+      "nombreAtributo": "edad",
+      "tipoDato": "number",
+      "integer": true,
+      "nulo": true,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "fechaNacimiento",
+      "tipoDato": "Date",
+      "nulo": true,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "activo",
+      "tipoDato": "boolean",
+      "nulo": false,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "perfil",
+      "tipoDato": "relation",
+      "rEntity": "PerfilEntity",
+      "tipoRelacion": "OneToOne",
+      "nulo": true,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "posts",
+      "tipoDato": "relation",
+      "rEntity": "PostEntity",
+      "tipoRelacion": "OneToMany",
+      "nulo": false,
+      "unico": false
+    },
+    {
+      "nombreAtributo": "roles",
+      "tipoDato": "relation",
+      "rEntity": "RolEntity",
+      "tipoRelacion": "ManyToMany",
+      "nulo": false,
+      "unico": false
+    }
+  ]
+} 

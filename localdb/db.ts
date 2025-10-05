@@ -1,9 +1,10 @@
 import Dexie from 'dexie'
+import {RutaEntity} from "./entity";
 
 export class Schema {
-  // eslint-disable-next-line no-useless-constructor
+ ruta: RutaEntity;
   constructor () {
-
+this.ruta=new RutaEntity();
   }
 }
 
@@ -24,7 +25,11 @@ export class DexieTable<T> {
   schema (): any {
     const result: any = {}
     for (const tabla in this.tablas) {
-      result[tabla] = Object.keys(this.tablas[tabla]).join(', ')
+      if (tabla === 'ruta') {
+        result[tabla] = 'id, ruta'
+      } else {
+        result[tabla] = Object.keys(this.tablas[tabla]).join(', ')
+      }
     }
     return result
   }

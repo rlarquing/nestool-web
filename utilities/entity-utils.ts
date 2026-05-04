@@ -68,6 +68,11 @@ export function generarColumna(atributo: any, databaseType: string = 'postgresql
     return `@Column(${optionsString})\n    ${atributo.nombreAtributo}: ${tipoTypeScript};`;
 }
 
+export function aInicialMinuscula(str: string): string {
+    if (!str) return str;
+    return str.charAt(0).toLowerCase() + str.slice(1);
+}
+
 export function generarRelacion(atributo: any): string {
     const { tipoRelacion, rEntity, nombreAtributo } = atributo;
     const entityNameLower = rEntity.toLowerCase();

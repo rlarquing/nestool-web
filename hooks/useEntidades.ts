@@ -1,18 +1,27 @@
 import { useState } from 'react';
 
+interface FetchEntidadesOptions {
+  filtrarSinCrud?: boolean;
+  excluirNomencladores?: boolean;
+}
+
 export function useEntidades(rutaApi: string | null) {
   const [entidades, setEntidades] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchEntidades = async () => {
+  const fetchEntidades = async (options: FetchEntidadesOptions = {}) => {
     if (!rutaApi) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/listar-entidades', {
         method: 'POST',
-        body: JSON.stringify({ basePath: rutaApi }),
+        body: JSON.stringify({ 
+          basePath: rutaApi,
+          filtrarSinCrud: options.filtrarSinCrud,
+          excluirNomencladores: options.excluirNomencladores
+        }),
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
@@ -30,4 +39,4 @@ export function useEntidades(rutaApi: string | null) {
   };
 
   return { entidades, fetchEntidades, loading, error };
-} 
+}

@@ -1,0 +1,16 @@
+
+
+.submit {
+    display:flex;
+    align-items: center;
+    justify-content:center;
+    flex-direction: column;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+.error {
+    color: brown;
+    margin: 1rem 0 0;
+}

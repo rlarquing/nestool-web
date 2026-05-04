@@ -57,7 +57,7 @@ const data = {
       items: [
         {
           title: "Crear un controlador",
-          url: "'/crear-controlador",
+          url: "/crear-controlador",
         },
         {
           title: "Crear un service",

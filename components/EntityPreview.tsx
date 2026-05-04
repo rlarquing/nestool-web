@@ -23,14 +23,14 @@ export function EntityPreview({ entityName, esquema, atributos }: EntityPreviewP
     if (!entityName) {
         return (
             <Card className="w-full">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                <CardHeader className="py-3">
+                    <CardTitle className="flex items-center gap-2 text-sm">
                         Vista previa de la entidad
                     </CardTitle>
                 </CardHeader>
-                <CardContent>
-                    <div className="text-center text-muted-foreground py-8">
-                        <p>Completa el formulario para ver la vista previa de la entidad</p>
+                <CardContent className="pt-2 pb-3">
+                    <div className="text-center text-muted-foreground py-4">
+                        <p className="text-xs">Completa el formulario para ver la vista previa de la entidad</p>
                     </div>
                 </CardContent>
             </Card>
@@ -40,25 +40,25 @@ export function EntityPreview({ entityName, esquema, atributos }: EntityPreviewP
     if (atributos.length === 0) {
         return (
             <Card className="w-full">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                <CardHeader className="py-3">
+                    <CardTitle className="flex items-center gap-2 text-sm">
                         Vista previa de la entidad
-                        <Badge variant="secondary">{entityName}</Badge>
+                        <Badge variant="secondary" className="text-xs">{entityName}</Badge>
                     </CardTitle>
                 </CardHeader>
-                <CardContent>
-                    <div className="space-y-4">
+                <CardContent className="pt-2 pb-3">
+                    <div className="space-y-2">
                         <div>
-                            <h4 className="font-medium mb-2">Información general</h4>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
+                            <h4 className="font-medium mb-1 text-xs">Información general</h4>
+                            <div className="grid grid-cols-2 gap-1 text-[10px]">
                                 <div><span className="font-medium">Nombre:</span> {entityName}</div>
                                 <div><span className="font-medium">Esquema:</span> {esquema || 'public'}</div>
                                 <div><span className="font-medium">Atributos:</span> 0</div>
                                 <div><span className="font-medium">Herencia:</span> GenericEntity</div>
                             </div>
                         </div>
-                        <div className="text-center text-muted-foreground py-4">
-                            <p>Agrega atributos para ver la vista previa completa</p>
+                        <div className="text-center text-muted-foreground py-2">
+                            <p className="text-xs">Agrega atributos para ver la vista previa completa</p>
                         </div>
                     </div>
                 </CardContent>
@@ -102,17 +102,17 @@ export function EntityPreview({ entityName, esquema, atributos }: EntityPreviewP
 
     return (
         <Card className="w-full">
-            <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            <CardHeader className="py-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
                     Vista previa de la entidad
-                    <Badge variant="secondary">{entityName}</Badge>
+                    <Badge variant="secondary" className="text-xs">{entityName}</Badge>
                 </CardTitle>
             </CardHeader>
-            <CardContent>
-                <div className="space-y-4">
+            <CardContent className="pt-2 pb-3">
+                <div className="space-y-2">
                     <div>
-                        <h4 className="font-medium mb-2">Información general</h4>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <h4 className="font-medium mb-1 text-xs">Información general</h4>
+                        <div className="grid grid-cols-2 gap-1 text-[10px]">
                             <div><span className="font-medium">Nombre:</span> {entityName}</div>
                             <div><span className="font-medium">Esquema:</span> {esquema || 'public'}</div>
                             <div><span className="font-medium">Atributos:</span> {atributos.length}</div>
@@ -121,33 +121,32 @@ export function EntityPreview({ entityName, esquema, atributos }: EntityPreviewP
                     </div>
                     
                     <div>
-                        <h4 className="font-medium mb-2">Atributos</h4>
-                        <div className="space-y-2">
+                        <h4 className="font-medium mb-1 text-xs">Atributos</h4>
+                        <div className="space-y-1">
                             {atributos.map((atributo, index) => (
-                                <div key={index} className="flex items-center justify-between p-2 bg-muted rounded">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium">{atributo.nombreAtributo}</span>
+                                <div key={index} className="flex items-center justify-between p-1.5 bg-muted rounded">
+                                    <div className="flex items-center gap-1">
+                                        <span className="font-medium text-xs">{atributo.nombreAtributo}</span>
                                         <span className="text-muted-foreground">:</span>
-                                        <Badge variant="outline">{getTipoDisplay(atributo)}</Badge>
+                                        <Badge variant="outline" className="text-[10px]">{getTipoDisplay(atributo)}</Badge>
                                     </div>
                                     <div className="flex gap-1">
                                         {getDecoradores(atributo).map((decorador, i) => (
-                                            <Badge key={i} variant="secondary" className="text-xs">
+                                            <Badge key={i} variant="secondary" className="text-[10px]">
                                                 @{decorador}
                                             </Badge>
                                         ))}
-                                        {atributo.nulo && <Badge variant="destructive" className="text-xs">nullable</Badge>}
-                                        {atributo.unico && <Badge variant="destructive" className="text-xs">unique</Badge>}
+                                        {atributo.nulo && <Badge variant="destructive" className="text-[10px]">nullable</Badge>}
+                                        {atributo.unico && <Badge variant="destructive" className="text-[10px]">unique</Badge>}
                                     </div>
                                 </div>
                             ))}
                         </div>
                     </div>
                     
-                    <div className="text-xs text-muted-foreground">
-                        <p>• La entidad se creará o modificará en: <code>src/persistence/entity/{formatEntityName(entityName)}.entity.ts</code></p>
-                        <p>• Se actualizará automáticamente el módulo persistence.module.ts</p>
-                        <p>• Se agregará la exportación en el index.ts del directorio entity</p>
+                    <div className="text-[10px] text-muted-foreground pt-1 border-t">
+                        <p>• Entidad: <code>{formatEntityName(entityName)}.entity.ts</code></p>
+                        <p>• Se actualizará: persistence.module.ts e index.ts</p>
                     </div>
                 </div>
             </CardContent>

@@ -36,8 +36,8 @@ export default function RootLayout({
           <div className="z-10">
             <AppSidebar />
           </div>
-          <div className="relative w-full h-screen">
-            <main className="absolute inset-0 flex items-center justify-center min-h-screen">
+          <div className="relative w-full h-screen overflow-hidden">
+            <main className="absolute inset-0 overflow-y-auto">
               {children}
             </main>
           </div>

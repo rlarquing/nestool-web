@@ -192,6 +192,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
 
     // Clases de tamaño
     const sizeClasses = {
+      xs: "h-7 px-2 text-xs",
       sm: "h-8 px-2 text-xs",
       default: "h-9 px-3 text-sm",
       lg: "h-10 px-4 text-base",
@@ -200,6 +201,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
     // Clases de ancho
     const widthClasses = {
       auto: "w-auto",
+      xs: "w-32",
       sm: "w-48",
       md: "w-64",
       lg: "w-80",

@@ -21,13 +21,7 @@ import { useCrearCrudCompleto } from "@/hooks/useCrearCrudCompleto";
 import { useEntidades } from "@/hooks/useEntidades";
 import { formatearNombre, eliminarSufijo, aInicialMinuscula } from "@/utilities/entity-utils";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 
 const crudSchema = z.object({
   entityName: z.string().min(1, "El nombre de la entidad es requerido"),
@@ -108,30 +102,24 @@ export default function CrearCrudCompletoPage() {
                         <FormLabel className="text-sm">
                           Seleccionar entidad
                         </FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                          disabled={loadingEntidades || entidades.length === 0}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full h-9">
-                              <SelectValue placeholder={
-                                loadingEntidades 
-                                  ? "Cargando entidades..." 
-                                  : entidades.length === 0 
-                                    ? "No hay entidades disponibles" 
-                                    : "Selecciona una entidad"
-                              } />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {entidades.map((entidad) => (
-                              <SelectItem key={entidad} value={entidad}>
-                                {entidad}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <Combobox
+                            options={entidades.map(e => ({ value: e, label: e }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={
+                              loadingEntidades 
+                                ? "Cargando entidades..." 
+                                : entidades.length === 0 
+                                  ? "No hay entidades disponibles" 
+                                  : "Selecciona una entidad"
+                            }
+                            searchPlaceholder="Buscar entidad..."
+                            disabled={loadingEntidades || entidades.length === 0}
+                            width="xl"
+                            className="w-full h-9"
+                          />
+                        </FormControl>
                         <div className="text-xs text-muted-foreground mt-1">
                           Solo se muestran entidades que no tienen CRUD creado y no son nomencladores.
                           {entidades.length === 0 && !loadingEntidades && (

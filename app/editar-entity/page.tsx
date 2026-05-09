@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { getColumns } from "./columns";
@@ -247,22 +246,16 @@ export default function EditarEntidadPage() {
                                                 <FormItem>
                                                     <FormLabel className="text-sm">Entidad a editar</FormLabel>
                                                     <FormControl>
-                                                        <Select
+                                                        <Combobox
+                                                            options={entidades.map(e => ({ value: e, label: e }))}
                                                             value={entidadSeleccionada}
                                                             onValueChange={onSeleccionarEntidad}
+                                                            placeholder="Selecciona una entidad"
+                                                            searchPlaceholder="Buscar entidad..."
                                                             disabled={loadingEntidades}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="Selecciona una entidad" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {entidades.map((entidad) => (
-                                                                    <SelectItem key={entidad} value={entidad}>
-                                                                        {entidad}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                            width="xl"
+                                                            className="w-full h-9"
+                                                        />
                                                     </FormControl>
                                                     <div className="text-xs text-muted-foreground mt-1">
                                                         Selecciona la entidad que deseas modificar para agregar o quitar atributos.

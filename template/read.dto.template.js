@@ -1,6 +1,5 @@
 module.exports=`import {ApiProperty, $swagger} from "@nestjs/swagger";
 $import
-$herencia
 export class Read$nameDto $padre {
     @ApiProperty({ description: 'Nombre del objeto', example: 'Objeto 1' })
     dtoToString: string;

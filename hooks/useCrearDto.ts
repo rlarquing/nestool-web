@@ -14,6 +14,7 @@ interface DtoData {
     atributos: AtributoDto[];
     basePath: string;
     modo: 'nuevo' | 'crud';
+    esNomenclador?: boolean;
 }
 
 interface CrearDtoResult {

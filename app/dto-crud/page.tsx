@@ -11,14 +11,15 @@ import {
   FormControl,
   FormMessage,
 } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useEffect } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRutaApi } from "@/hooks/useRutaApi";
 import { useCrearDto } from "@/hooks/useCrearDto";
+import { useEntidades } from "@/hooks/useEntidades";
+import { Combobox } from "@/components/ui/combobox";
 
 const crudSchema = z.object({
   entityName: z.string().min(1, "El nombre de la entidad es requerido"),
@@ -37,6 +38,14 @@ export default function DtoCrudPage() {
 
   const { ruta } = useRutaApi();
   const { crearDto, loading: loadingCrear } = useCrearDto();
+  const { entidades, fetchEntidades, loading: loadingEntidades } = useEntidades(ruta);
+
+  // Cargar entidades al inicio
+  useEffect(() => {
+    if (ruta) {
+      fetchEntidades({ filtrarSinCrud: true });
+    }
+  }, [ruta]);
 
   const onSubmit = async (data: CrudForm) => {
     const dtoData = {
@@ -81,18 +90,22 @@ export default function DtoCrudPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-sm">
-                          Nombre de la entidad
+                          Entidad
                         </FormLabel>
                         <FormControl>
-                          <Input
-                            placeholder="Ej: UsuarioEntity"
-                            {...field}
+                          <Combobox
+                            options={entidades.map(e => ({ value: e, label: e }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={loadingEntidades ? "Cargando..." : "Selecciona una entidad"}
+                            searchPlaceholder="Buscar entidad..."
+                            disabled={loadingEntidades}
+                            width="xl"
                             className="w-full h-9"
                           />
                         </FormControl>
                         <div className="text-xs text-muted-foreground mt-1">
-                          Escribe el nombre de la entidad para generar los 4
-                          DTOs del CRUD: Create, Update, UpdateMultiple y Read.
+                          Selecciona una entidad para generar los 4 DTOs del CRUD: Create, Update, UpdateMultiple y Read.
                         </div>
                         <FormMessage />
                       </FormItem>

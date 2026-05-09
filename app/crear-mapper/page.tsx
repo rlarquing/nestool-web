@@ -2,6 +2,7 @@
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Form,
@@ -11,9 +12,9 @@ import {
   FormControl,
   FormMessage,
 } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Combobox } from "@/components/ui/combobox";
 import { toast } from "sonner";
 import { useRutaApi } from "@/hooks/useRutaApi";
 import { useCrearMapper } from "@/hooks/useCrearMapper";
@@ -26,6 +27,8 @@ const mapperSchema = z.object({
 type MapperForm = z.infer<typeof mapperSchema>;
 
 export default function CrearMapperPage() {
+  const [entidadSeleccionada, setEntidadSeleccionada] = useState<string>("");
+  
   const form = useForm<MapperForm>({
     resolver: zodResolver(mapperSchema),
     defaultValues: {
@@ -34,8 +37,19 @@ export default function CrearMapperPage() {
   });
 
   const { ruta } = useRutaApi();
-  const { entidades } = useEntidades(ruta);
+  const { entidades, fetchEntidades, loading: loadingEntidades, error: errorEntidades } = useEntidades(ruta);
   const { crearMapper, loading: loadingCrear, error: errorCrear } = useCrearMapper();
+
+  useEffect(() => {
+    if (ruta) {
+      fetchEntidades();
+    }
+  }, [ruta]);
+
+  const onSeleccionarEntidad = (entityName: string) => {
+    setEntidadSeleccionada(entityName);
+    form.setValue("entityName", entityName);
+  };
 
   const entityName = form.watch("entityName");
   const nombreSinEntity = entityName.endsWith("Entity")
@@ -86,11 +100,11 @@ export default function CrearMapperPage() {
                           Nombre de la entidad
                         </FormLabel>
                         <FormControl>
-                          <Input
-                            placeholder="Ej: UsuarioEntity"
-                            {...field}
-                            className="w-full h-9"
-                          />
+<Select
+                              options={entidades.map(entity => ({ label: entity.name, value: entity.name }))}
+                              value={field.value}
+                              onChange={field.onChange}
+                            />
                         </FormControl>
                         <div className="text-xs text-muted-foreground mt-1">
                           Selecciona una entidad existente para generar su mapper.

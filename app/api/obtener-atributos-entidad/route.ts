@@ -174,7 +174,7 @@ function extractColumnOptions(content: string, propertyName: string): any {
         const optionsStr = decoratorMatch[1].trim();
 
         // Manejar sintaxis con {} y sin {}
-        let parsedOptions = {};
+        let parsedOptions: Record<string, any> = {};
         if (optionsStr.startsWith("{") && optionsStr.endsWith("}")) {
           // Sintaxis correcta: { length: 100, nullable: false }
           try {

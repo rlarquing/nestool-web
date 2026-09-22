@@ -3,36 +3,35 @@ import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { formatearNombre, eliminarSufijo, aInicialMinuscula } from '@/utilities/entity-utils';
 
-const controllerTemplate = `import {Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards, UsePipes, ValidationPipe} from '@nestjs/common';
+const controllerTemplate = `import {Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards} from '@nestjs/common';
 import {$nameService} from '../../core/service';
-import {GetUser, Servicio} from "../decorator";
-import {RolType} from "../../shared/enum";
+import {GetUser, IpAddress, Servicio, PaginationParams} from '../decorator';
 import {AuthGuard} from "@nestjs/passport";
 import {$nameEntity, UserEntity} from "../../persistence/entity";
-import {ConfigService} from "@nestjs/config";
 import { ApiBearerAuth,
   ApiBody,
   ApiNotFoundResponse,
   ApiOperation,
-  ApiParam, ApiQuery,
+  ApiQuery,
   ApiResponse,
   ApiTags,} from "@nestjs/swagger";
 import {GenericController} from "./generic.controller";
 import {BadRequestDto, BuscarDto, FiltroGenericoDto, ListadoDto, ResponseDto, Create$nameDto, Read$nameDto, UpdateMultiple$nameDto, Update$nameDto} from "../../shared/dto";
 import {RolGuard, PermissionGuard} from '../guard';
+import {PaginationParamsDto, PaginationService} from '../../shared/pagination';
+$import
 
 @ApiTags('$tag')
 @Controller('$paraCont')
 @UseGuards(AuthGuard('jwt'), RolGuard, PermissionGuard)
 @ApiBearerAuth()
-@UsePipes(ValidationPipe)
 export class $nameController extends GenericController<$nameEntity> {
     constructor(
         protected $paramService: $nameService,
-    protected configService: ConfigService
-) {
-    super($paramService, configService, '$paraCont');
-}
+        protected paginationService: PaginationService,
+    ) {
+        super($paramService, paginationService, '$paraCont');
+    }
 
 @Get('/')
 @ApiOperation({summary: 'Obtener el listado de elementos del conjunto'})
@@ -48,13 +47,11 @@ export class $nameController extends GenericController<$nameEntity> {
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
 @ApiResponse({status: 403, description: 'Sin autorizacion al recurso.'})
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
-@ApiParam({ required: false, name: 'page', example: '1' })
-@ApiParam({ required: false, name: 'limit', example: '10' })
+@ApiQuery({ required: false, name: 'page', example: '1' })
+@ApiQuery({ required: false, name: 'limit', example: '10' })
 @Servicio($nServicio, 'findAll')
-async findAll(
-    @Query('page') page: number = 1,
-@Query('limit') limit: number = 10): Promise<any> {
-    const data = await super.findAll(page, limit);
+async findAll(@PaginationParams() params: PaginationParamsDto): Promise<any> {
+    const data = await super.findAll(params);
     const header: string[] = ['id', $header];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
@@ -114,8 +111,8 @@ async findByIds(@Body() ids: number[]): Promise<Read$nameDto[]> {
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
 @ApiResponse({status: 400, description: 'Solicitud con errores.',type: BadRequestDto})
 @Servicio($nServicio, 'create')
-async create(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto): Promise<ResponseDto> {
-    return await super.create(user, create$nameDto);
+async create(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto, @IpAddress() ip: string): Promise<ResponseDto> {
+    return await super.create(user, create$nameDto, ip);
 }
 
 @Post('/multiple')
@@ -130,8 +127,8 @@ async create(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
 @ApiResponse({status: 400, description: 'Solicitud con errores.',type: BadRequestDto})
 @Servicio($nServicio, 'createMultiple')
-async createMultiple(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto[]): Promise<ResponseDto[]> {
-    return await super.createMultiple(user, create$nameDto);
+async createMultiple(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto[], @IpAddress() ip: string): Promise<ResponseDto[]> {
+    return await super.createMultiple(user, create$nameDto, ip);
 }
 
 @Post('/importar/elementos')
@@ -146,8 +143,8 @@ async createMultiple(@GetUser() user: UserEntity, @Body() create$nameDto: Create
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
 @ApiResponse({status: 400, description: 'Solicitud con errores.',type: BadRequestDto})
 @Servicio($nServicio, 'importar')
-async import(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto[]): Promise<ResponseDto[]> {
-    return await super.import(user, create$nameDto);
+async import(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto[], @IpAddress() ip: string): Promise<ResponseDto[]> {
+    return await super.import(user, create$nameDto, ip);
 }
 
 @Patch('/:id')
@@ -162,8 +159,8 @@ async import(@GetUser() user: UserEntity, @Body() create$nameDto: Create$nameDto
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
 @ApiResponse({status: 400, description: 'Solicitud con errores.',type: BadRequestDto})
 @Servicio($nServicio, 'update')
-async update(@GetUser() user: UserEntity, @Param('id', ParseIntPipe) id: number, @Body() update$nameDto: Update$nameDto): Promise<ResponseDto> {
-    return await super.update(user, id, update$nameDto);
+async update(@GetUser() user: UserEntity, @Param('id', ParseIntPipe) id: number, @Body() update$nameDto: Update$nameDto, @IpAddress() ip: string): Promise<ResponseDto> {
+    return await super.update(user, id, update$nameDto, ip);
 }
 
 @Patch('/elementos/multiples')
@@ -178,11 +175,11 @@ async update(@GetUser() user: UserEntity, @Param('id', ParseIntPipe) id: number,
 @ApiResponse({status: 500, description: 'Error interno del servidor.'})
 @ApiResponse({status: 400, description: 'Solicitud con errores.',type: BadRequestDto})
 @Servicio($nServicio, 'updateMultiple')
-async updateMultiple(@GetUser() user: UserEntity, @Body() updateMultiple$nameeDto: UpdateMultiple$nameDto[]): Promise<ResponseDto> {
-    return await super.updateMultiple(user, updateMultiple$nameeDto);
+async updateMultiple(@GetUser() user: UserEntity, @Body() updateMultiple$nameDto: UpdateMultiple$nameDto[], @IpAddress() ip: string): Promise<ResponseDto> {
+    return await super.updateMultiple(user, updateMultiple$nameDto, ip);
 }
 
-@Post('filtrar')
+@Post('/filtrar')
 @ApiOperation({summary: 'Filtrar el conjunto por los parametros establecidos'})
 @ApiResponse({
     status: 201,
@@ -199,15 +196,14 @@ async updateMultiple(@GetUser() user: UserEntity, @Body() updateMultiple$nameeDt
 @ApiQuery({ required: false, name: 'page', example: '1' })
 @ApiQuery({ required: false, name: 'limit', example: '10' })
 @Servicio($nServicio, 'filter')
-async filter(@Query('page') page: number = 1,
-@Query('limit') limit: number = 10,
+async filter(@PaginationParams() params: PaginationParamsDto,
 @Body() filtroGenericoDto: FiltroGenericoDto): Promise<any> {
-    const data = await super.filter(page, limit, filtroGenericoDto);
+    const data = await super.filter(params, filtroGenericoDto);
     const header: string[] = ['id', $header];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
-@Post('buscar')
+@Post('/buscar')
 @ApiOperation({summary: 'Buscar en el conjunto por el parametro establecido'})
 @ApiResponse({
     status: 201,
@@ -224,10 +220,9 @@ return new ListadoDto(header, key, data);
 @ApiQuery({ required: false, name: 'page', example: '1' })
 @ApiQuery({ required: false, name: 'limit', example: '10' })
 @Servicio($nServicio, 'search')
-async search(@Query('page') page: number = 1,
-@Query('limit') limit: number = 10,
+async search(@PaginationParams() params: PaginationParamsDto,
 @Body() buscarDto: BuscarDto): Promise<any> {
-    const data = await super.search(page, limit, buscarDto);
+    const data = await super.search(params, buscarDto);
     const header: string[] = ['id', $header];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
@@ -259,6 +254,8 @@ export async function POST(req: NextRequest) {
         const nombreSinEntity = eliminarSufijo(entityName, 'Entity');
         const nombre = nombreSinEntity;
         const nombreLower = aInicialMinuscula(nombre);
+        // La clase real siempre termina en "Entity" (así la crea crear-entidad)
+        const entityClassName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         const tag = nombre + 's';
         const controllerClassName = nombre + 'Controller';
         const serviceName = nombre + 'Service';
@@ -273,17 +270,18 @@ export async function POST(req: NextRequest) {
 
         // Leer la entidad para obtener los atributos
         const entityPath = path.join(basePath, `src/persistence/entity/${formatearNombre(nombreSinEntity, '-')}.entity.ts`);
-        let atributos = [];
+        let atributos: string[] = [];
         
         if (existsSync(entityPath)) {
             const entityContent = readFileSync(entityPath, 'utf-8');
             // Extraer nombres de atributos (solo los básicos, no relaciones)
-            const attributeMatches = entityContent.match(/@Column\([^)]*\)\s*\n\s*(\w+)(\??):/g);
+            // admite "propiedad:" "propiedad?:" y "propiedad!:" (TS estricto)
+            const attributeMatches = entityContent.match(/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/g);
             if (attributeMatches) {
                 atributos = attributeMatches.map(match => {
-                    const nameMatch = match.match(/@Column\([^)]*\)\s*\n\s*(\w+)(\??):/);
+                    const nameMatch = match.match(/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/);
                     return nameMatch ? `'${nameMatch[1]}'` : null;
-                }).filter(Boolean);
+                }).filter(Boolean) as string[];
             }
         }
 
@@ -295,7 +293,7 @@ export async function POST(req: NextRequest) {
         // Preparar template
         let template = controllerTemplate;
         template = template.replace(/\$nameService/g, serviceName);
-        template = template.replace(/\$nameEntity/g, entityName);
+        template = template.replace(/\$nameEntity/g, entityClassName);
         template = template.replace(/\$name/g, nombre);
         template = template.replace(/\$param/g, nombreLower);
         template = template.replace(/\$paraCont/g, nombreLower);

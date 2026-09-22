@@ -100,11 +100,15 @@ export default function CrearMapperPage() {
                           Nombre de la entidad
                         </FormLabel>
                         <FormControl>
-<Select
-                              options={entidades.map(entity => ({ label: entity.name, value: entity.name }))}
-                              value={field.value}
-                              onChange={field.onChange}
-                            />
+                          <Combobox
+                            options={entidades.map(e => ({ value: e, label: e }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder="Selecciona una entidad"
+                            searchPlaceholder="Buscar entidad..."
+                            width="xl"
+                            className="w-full h-9"
+                          />
                         </FormControl>
                         <div className="text-xs text-muted-foreground mt-1">
                           Selecciona una entidad existente para generar su mapper.

@@ -1,4 +1,4 @@
-import {esMayuscula} from "./es-mayuscula.utility";
+const esMayuscula = (caracter: string): boolean => /^[A-Z]$/.test(caracter);
 
 export const formatearNombre = (str: string, separador: string) => {
     if (str.length === 0) {

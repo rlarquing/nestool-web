@@ -65,16 +65,22 @@ function parseEntityAttributes(content: string): any[] {
                     if (prevLine.includes("@Column") || prevLine.includes("@PrimaryGeneratedColumn") || prevLine.includes("@PrimaryColumn")) {
                         decoratorOptions = columnOptionsMap.get(j) || {};
                         decoratorType = 'Column';
+                        break;
                     } else if (prevLine.includes("@OneToOne")) {
                         decoratorType = 'OneToOne';
+                        break;
                     } else if (prevLine.includes("@OneToMany")) {
                         decoratorType = 'OneToMany';
+                        break;
                     } else if (prevLine.includes("@ManyToOne")) {
                         decoratorType = 'ManyToOne';
+                        break;
                     } else if (prevLine.includes("@ManyToMany")) {
                         decoratorType = 'ManyToMany';
+                        break;
                     }
-                    break;
+                    // JoinColumn/JoinTable/Index/etc.: seguir subiendo hasta el decorador de relación
+                    continue;
                 }
                 // Si encontramos otra propiedad, no hay decorador para esta
                 if (prevLine.match(/^\w+:/)) {
@@ -153,7 +159,8 @@ function parseEntityAttributes(content: string): any[] {
 
 // Templates para DTOs
 const dtoTemplate = `import {$validadores} from "class-validator";
-import {ApiProperty, $swagger} from "@nestjs/swagger";
+import { i18nValidationMessage } from 'nestjs-i18n';
+import {ApiProperty} from "@nestjs/swagger";
 $import
 export class $nameDto {
 $atributos
@@ -161,32 +168,36 @@ $atributos
 `;
 
 const createDtoTemplate = `import {$validadores} from "class-validator";
-import {ApiProperty, $swagger} from "@nestjs/swagger";
+import { i18nValidationMessage } from 'nestjs-i18n';
+import {ApiProperty} from "@nestjs/swagger";
 $import
 export class Create$nameDto $padre{
 $atributos
 }`;
 
 const updateDtoTemplate = `import {$validadores} from "class-validator"
-import {ApiProperty, $swagger} from "@nestjs/swagger";
+import { i18nValidationMessage } from 'nestjs-i18n';
+import {ApiProperty} from "@nestjs/swagger";
 $import
 export class Update$nameDto $padre{
 $atributos
 }`;
 
 const updateMultipleDtoTemplate = `import {$validadores} from "class-validator";
-import {ApiProperty, $swagger} from "@nestjs/swagger";
+import { i18nValidationMessage } from 'nestjs-i18n';
+import {ApiProperty} from "@nestjs/swagger";
 $import
 export class UpdateMultiple$nameDto $padre {
 
     @IsNotEmpty()
+    @IsNumber()
     @ApiProperty({ description: 'id de la $name', example: 1 })
-    id: number
+    id!: number
 
     $atributos
 }`;
 
-const readDtoTemplate = `import {ApiProperty, $swagger} from "@nestjs/swagger";
+const readDtoTemplate = `import {ApiProperty} from "@nestjs/swagger";
 $import
 export class Read$nameDto $padre {
     @ApiProperty({ description: 'Nombre del objeto', example: 'Objeto 1' })
@@ -232,7 +243,7 @@ function generarAtributoDto(atributo: AtributoDto): {
         case 'noNulo':
             validadores.push('IsNotEmpty');
             codigoValidadores += ' @IsNotEmpty()\n';
-            atributoStr = ` ${atributo.nombreAtributo}: ${tipo};`;
+            atributoStr = ` ${atributo.nombreAtributo}!: ${tipo};`;
             break;
         case 'esOpcional':
             atributoStr = ` ${atributo.nombreAtributo}?: ${tipo};`;
@@ -243,23 +254,23 @@ function generarAtributoDto(atributo: AtributoDto): {
             break;
     }
     
-    // Validadores según tipo de dato
+    // Validadores según tipo de dato (mensajes traducidos vía i18n, igual que la api-base)
     switch (atributo.tipoDato) {
         case 'string':
             validadores.push('IsString');
-            codigoValidadores += ` @IsString({message: 'El atributo ${atributo.nombreAtributo} debe de ser un string'})\n`;
+            codigoValidadores += ` @IsString({ message: i18nValidationMessage('validation.IS_STRING') })\n`;
             break;
         case 'number':
             validadores.push('IsNumber');
-            codigoValidadores += ` @IsNumber({},{message: 'El atributo ${atributo.nombreAtributo} debe de ser un number'})\n`;
+            codigoValidadores += ` @IsNumber({}, { message: i18nValidationMessage('validation.IS_NUMBER') })\n`;
             break;
         case 'date':
             validadores.push('IsDate');
-            codigoValidadores += ` @IsDate({message: 'El atributo ${atributo.nombreAtributo} debe de ser formato válido'})\n    @Type(() => Date)\n`;
+            codigoValidadores += ` @IsDate({ message: i18nValidationMessage('validation.IS_DATE') })\n`;
             break;
         case 'boolean':
             validadores.push('IsBoolean');
-            codigoValidadores += ` @IsBoolean({message: 'El atributo ${atributo.nombreAtributo} debe de ser un boolean'})\n`;
+            codigoValidadores += ` @IsBoolean({ message: i18nValidationMessage('validation.IS_BOOLEAN') })\n`;
             break;
         case 'string[]':
         case 'number[]':
@@ -268,7 +279,7 @@ function generarAtributoDto(atributo: AtributoDto): {
         case 'any[]':
         case 'dto[]':
             validadores.push('IsArray');
-            codigoValidadores += ` @IsArray({message: 'El atributo ${atributo.nombreAtributo} debe de ser un arreglo'})\n`;
+            codigoValidadores += ` @IsArray({ message: i18nValidationMessage('validation.IS_ARRAY') })\n`;
             break;
     }
     
@@ -322,19 +333,28 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
             if (esNom) {
                 relacionesNomenclador.push(attr.nombreAtributo);
                 dtoType = 'ReadNomencladorDto';
+            } else {
+                // Convención de la api-base: las relaciones se expresan por id
+                // (ver create-user.dto.ts: roles!: number[]) — nunca importando la entity
+                dtoType = (attr.tipoRelacion === 'OneToMany' || attr.tipoRelacion === 'ManyToMany')
+                    ? 'number[]'
+                    : 'number';
             }
         }
-        
+
         // Generar validadores según nullable
         if (attr.nulo === false && !tipo.startsWith('relation')) {
             validadoresSet.add('IsNotEmpty');
         }
+        // Los templates siempre emiten @IsOptional(), garantizar el import
+        validadoresSet.add('IsOptional');
         
         switch (tipo) {
             case 'string':
                 validadoresSet.add('IsString');
                 break;
             case 'number':
+            case 'relation':
                 validadoresSet.add('IsNumber');
                 break;
             case 'boolean':
@@ -345,26 +365,36 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
                 validadoresSet.add('IsDate');
                 break;
         }
+        if (dtoType === 'number[]') {
+            validadoresSet.add('IsArray');
+        }
 
         // CREATE DTO
+        // Validador por tipo con mensaje i18n (mismo estilo que la api-base)
+        let tipoValidador = '';
+        if (dtoType === 'string') tipoValidador = `@IsString({ message: i18nValidationMessage('validation.IS_STRING') })`;
+        else if (dtoType === 'number') tipoValidador = `@IsNumber({}, { message: i18nValidationMessage('validation.IS_NUMBER') })`;
+        else if (dtoType === 'number[]') tipoValidador = `@IsArray({ message: i18nValidationMessage('validation.IS_ARRAY') })`;
+        else if (dtoType === 'boolean') tipoValidador = `@IsBoolean({ message: i18nValidationMessage('validation.IS_BOOLEAN') })`;
+        else if (dtoType === 'Date') tipoValidador = `@IsDate({ message: i18nValidationMessage('validation.IS_DATE') })`;
+        const bloqueTipo = tipoValidador ? `    ${tipoValidador}\n` : '';
+
         if (attr.nulo === false) {
-            createAttrs.push(`    @IsNotEmpty()\n    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}: ${dtoType};`);
+            createAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}!: ${dtoType};`);
         } else {
-            createAttrs.push(`    @IsOptional()\n    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+            createAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
         }
 
         // UPDATE DTO - todos opcionales
-        updateAttrs.push(`    @IsOptional()\n    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+        updateAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
 
-        // READ DTO - incluir todos
-        readAttrs.push(`    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}: ${dtoType};`);
+        // READ DTO - incluir todos (declaraciones y parámetros opcionales para que
+        // el constructor positional del mapper siempre compile). Sin validadores:
+        // los Read*Dto de la api-base solo llevan @ApiProperty.
+        readAttrs.push(`    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
 
         // Parámetros para el constructor del Read DTO
-        if (attr.nulo === false) {
-            parametrosList.push(`${attr.nombreAtributo}: ${dtoType}`);
-        } else {
-            parametrosList.push(`${attr.nombreAtributo}?: ${dtoType}`);
-        }
+        parametrosList.push(`${attr.nombreAtributo}?: ${dtoType}`);
         thisAttrsList.push(`this.${attr.nombreAtributo} = ${attr.nombreAtributo};`);
     }
 
@@ -511,7 +541,6 @@ export async function POST(req: NextRequest) {
             
             
             // Leer la entidad para obtener sus atributos
-            // Formatear el nombre de la entidad: BuqueEntity -> Buque ->慕que (kebab-case)
             const entityNameSinEntity = dtoName.endsWith("Entity") ? dtoName.replace("Entity", "") : dtoName;
             const entityFileName = formatearNombre(entityNameSinEntity, '-'); // Convierte a kebab-case
           
@@ -571,9 +600,10 @@ export async function POST(req: NextRequest) {
             const updateFilePath = path.join(dtoDir, `update-${formatearNombre(nombre, '-')}.dto.ts`);
             writeFileSync(updateFilePath, updateDtoCode);
 
-            // 3. UPDATE MULTIPLE DTO
+            // 3. UPDATE MULTIPLE DTO (el id siempre es requerido y numérico)
+            const umValidadores = Array.from(new Set([...codigoAtributos.validadores, 'IsNotEmpty', 'IsNumber']));
             let updateMultipleDtoCode = updateMultipleDtoTemplate
-                .replace('$validadores', codigoAtributos.validadores.join(', '))
+                .replace('$validadores', umValidadores.join(', '))
                 .replace('$swagger', 'ApiProperty')
                 .replace('$name', nombre)
                 .replace('$atributos', codigoAtributos.update);

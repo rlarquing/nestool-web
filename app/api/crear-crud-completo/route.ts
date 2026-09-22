@@ -25,13 +25,16 @@ export async function POST(req: NextRequest) {
     }
 
     const results: CrudResult = {};
+    // Los fetch server-to-server necesitan URL absoluta (fetch relativo falla en Node)
+    const origin = new URL(req.url).origin;
 
     // 1. Crear DTOs para el CRUD
     try {
-      const dtoResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/crear-dto`, {
+      const dtoResponse = await fetch(`${origin}/api/crear-dto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityName, basePath }),
+        // crear-dto espera "dtoName" y "modo: crud" (no entityName como las demas rutas)
+        body: JSON.stringify({ dtoName: entityName, basePath, modo: 'crud' }),
       });
       const dtoResult = await dtoResponse.json();
       results.dto = {
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Crear Mapper
     try {
-      const mapperResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/crear-mapper`, {
+      const mapperResponse = await fetch(`${origin}/api/crear-mapper`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entityName, basePath }),
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Crear Repository
     try {
-      const repositoryResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/crear-repository`, {
+      const repositoryResponse = await fetch(`${origin}/api/crear-repository`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entityName, basePath }),
@@ -85,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Crear Service
     try {
-      const serviceResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/crear-service`, {
+      const serviceResponse = await fetch(`${origin}/api/crear-service`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entityName, basePath, traza }),
@@ -104,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Crear Controller
     try {
-      const controllerResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/crear-controller`, {
+      const controllerResponse = await fetch(`${origin}/api/crear-controller`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entityName, basePath }),

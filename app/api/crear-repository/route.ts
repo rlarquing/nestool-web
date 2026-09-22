@@ -19,6 +19,39 @@ export class $nameRepository extends GenericRepository<$nameEntity> implements I
 
 }`;
 
+// Extrae los nombres de las propiedades de relacion tal y como estan declaradas
+// en la entidad (soporta decoradores en multiples lineas, @JoinColumn, etc.).
+// El nombre de la propiedad debe coincidir EXACTAMENTE con el atributo de la
+// entidad para que TypeORM resuelva el join.
+function extraerNombresRelaciones(entityContent: string): string[] {
+    const relaciones: string[] = [];
+    const lineas = entityContent.split('\n');
+    const regexRelacion = /@(OneToOne|OneToMany|ManyToOne|ManyToMany)\(/;
+    const regexPropiedad = /^\s*(\w+)(\?)?(!)?:\s*[\w\[\]]+.*;?\s*$/;
+
+    for (let i = 0; i < lineas.length; i++) {
+        if (regexRelacion.test(lineas[i])) {
+            // Buscar hacia adelante la primera declaracion de propiedad
+            for (let j = i + 1; j < lineas.length; j++) {
+                const linea = lineas[j].trim();
+                if (regexPropiedad.test(linea)) {
+                    const match = linea.match(regexPropiedad);
+                    if (match && !relaciones.includes(`'${match[1]}'`)) {
+                        relaciones.push(`'${match[1]}'`);
+                    }
+                    break;
+                }
+                // Si aparece otro decorador de relacion seguido, seguir buscando
+                // (JoinTable/JoinColumn no cortan la busqueda)
+                if (/^\s*@(?!OneToOne|OneToMany|ManyToOne|ManyToMany|Join)/.test(lineas[j])) {
+                    break;
+                }
+            }
+        }
+    }
+    return relaciones;
+}
+
 export async function POST(req: NextRequest) {
     try {
         const { entityName, basePath, relations = [] } = await req.json();
@@ -43,6 +76,8 @@ export async function POST(req: NextRequest) {
         const nombreSinEntity = eliminarSufijo(entityName, 'Entity');
         const nombre = nombreSinEntity;
         const nombreLower = aInicialMinuscula(nombre);
+        // La clase real siempre termina en "Entity" (así la crea crear-entidad)
+        const entityClassName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         const repositoryClassName = nombre + 'Repository';
         const fileName = `${formatearNombre(nombre, '-')}.repository.ts`;
         const filePath = path.join(repositoryDir, fileName);
@@ -53,25 +88,18 @@ export async function POST(req: NextRequest) {
             }, { status: 409 });
         }
 
-        // Leer la entidad para obtener las relaciones
+        // Leer la entidad para obtener las relaciones (por el NOMBRE de la propiedad declarada)
         const entityPath = path.join(basePath, `src/persistence/entity/${formatearNombre(nombreSinEntity, '-')}.entity.ts`);
         let relaciones: string[] = [];
-        
+
         if (existsSync(entityPath)) {
             const entityContent = readFileSync(entityPath, 'utf-8');
-            // Extraer nombres de relaciones (OneToOne, OneToMany, ManyToOne, ManyToMany)
-            const relationMatches = entityContent.match(/@(OneToOne|OneToMany|ManyToOne|ManyToMany)\(\(\) => (\w+)/g);
-            if (relationMatches) {
-                relaciones = relationMatches.map(match => {
-                    const nameMatch = match.match(/@(OneToOne|OneToMany|ManyToOne|ManyToMany)\(\(\) => (\w+)/);
-                    return nameMatch ? `'${nameMatch[2].toLowerCase()}'` : null;
-                }).filter(Boolean) as string[];
-            }
+            relaciones = extraerNombresRelaciones(entityContent);
         }
 
         // Preparar template
         let template = repositoryTemplate;
-        template = template.replace(/\$nameEntity/g, entityName);
+        template = template.replace(/\$nameEntity/g, entityClassName);
         template = template.replace(/\$name/g, nombre);
         template = template.replace(/\$param/g, nombreLower);
         template = template.replace(/\$relations/g, relaciones.length > 0 ? relaciones.join(', ') : '');

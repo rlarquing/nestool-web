@@ -23,7 +23,7 @@ import { Combobox } from "@/components/ui/combobox";
 
 const crudSchema = z.object({
   entityName: z.string().min(1, "El nombre de la entidad es requerido"),
-  esNomenclador: z.boolean().default(false),
+  esNomenclador: z.boolean(),
 });
 type CrudForm = z.infer<typeof crudSchema>;
 

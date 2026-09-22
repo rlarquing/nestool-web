@@ -56,6 +56,7 @@ export const useCrearEntidad = () => {
                 setError(errorMessage);
                 return {
                     success: false,
+                    message: errorMessage,
                     error: errorMessage,
                 };
             }
@@ -64,6 +65,7 @@ export const useCrearEntidad = () => {
             setError(errorMessage);
             return {
                 success: false,
+                message: errorMessage,
                 error: errorMessage,
             };
         } finally {

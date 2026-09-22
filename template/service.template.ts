@@ -1,9 +1,8 @@
-module.exports=`
-import {Injectable} from '@nestjs/common';
+module.exports=`import {Injectable} from '@nestjs/common';
 import {$nameEntity} from '../../persistence/entity';
 import {$nameRepository} from "../../persistence/repository";
 import {$nameMapper} from "../mapper";
-import {TrazaService} from "./traza.service";
+import {LogHistoryService} from "./log-history.service";
 import {GenericService} from "./generic.service";
 import { ConfigService } from '@nestjs/config';
 
@@ -13,8 +12,8 @@ export class $nameService extends GenericService<$nameEntity> {
         protected configService: ConfigService,
         protected $paramRepository: $nameRepository,
         protected $paramMapper: $nameMapper,
-        protected trazaService: TrazaService,
+        protected logHistoryService: LogHistoryService,
     ) {
-        super(configService, $paramRepository, $paramMapper, trazaService, $traza);
+        super(configService, $paramRepository, $paramMapper, logHistoryService, $traza);
     }
 }`;

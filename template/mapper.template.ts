@@ -1,4 +1,4 @@
-const mepperSinRelacion=`
+export const mepperSinRelacion=`
 import {Injectable} from '@nestjs/common';
 import {$nameEntity} from "../../persistence/entity";
 import {Create$nameDto, Read$nameDto, Update$nameDto} from "../../shared/dto";
@@ -21,7 +21,7 @@ return new Read$nameDto($parametrosEntityToDto);
 }
 }
 `;
-const mepperRelacion=`
+export const mepperRelacion=`
 import {Injectable} from '@nestjs/common';
 import {$nameEntity} from "../../persistence/entity";
 import {Create$nameDto, Read$nameDto, Update$nameDto} from "../../shared/dto";
@@ -54,4 +54,3 @@ return new Read$nameDto($parametrosEntityToDto);
 }
 }
 `;
-module.exports={mepperSinRelacion,mepperRelacion}

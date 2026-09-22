@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
         const nombreSinEntity = eliminarSufijo(entityName, 'Entity');
         const nombre = nombreSinEntity;
         const nombreLower = aInicialMinuscula(nombre);
+        // La clase real siempre termina en "Entity" (así la crea crear-entidad)
+        const entityClassName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         const mapperClassName = nombre + 'Mapper';
         const fileName = `${formatearNombre(nombre, '-')}.mapper.ts`;
         const filePath = path.join(mapperDir, fileName);
@@ -66,10 +68,10 @@ export async function POST(req: NextRequest) {
         if (existsSync(entityPath)) {
             const entityContent = readFileSync(entityPath, 'utf-8');
             // Extraer nombres de atributos (solo los básicos, no relaciones)
-            const attributeMatches = entityContent.match(/@Column\([^)]*\)\s*\n\s*(\w+)(\??):/g);
+            const attributeMatches = entityContent.match(/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/g);
             if (attributeMatches) {
                 atributos = attributeMatches.map(match => {
-                    const nameMatch = match.match(/@Column\([^)]*\)\s*\n\s*(\w+)(\??):/);
+                    const nameMatch = match.match(/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/);
                     return nameMatch ? nameMatch[1] : null;
                 }).filter(Boolean) as string[];
             }
@@ -85,12 +87,13 @@ export async function POST(req: NextRequest) {
         const analisisDtoToUpdateEntity = atributos.map(attr => 
             `        if (update${nombre}Dto.${attr} !== undefined) update${nombre}Entity.${attr} = update${nombre}Dto.${attr};`
         ).join('\n');
-        const parametrosEntityToDto = atributos.map(attr => `${nombreLower}Entity.${attr}`).join(', ');
+        // El Read DTO se construye con (dtoToString, id, ...atributos)
+        const parametrosEntityToDto = [`${nombreLower}Entity.toString()`, `${nombreLower}Entity.id`, ...atributos.map(attr => `${nombreLower}Entity.${attr}`)].join(', ');
         const attrNameEntity = `${nombreLower}Entity`;
 
         // Preparar template
         let template = mapperTemplate;
-        template = template.replace(/\$nameEntity/g, entityName);
+        template = template.replace(/\$nameEntity/g, entityClassName);
         template = template.replace(/\$nameDto/g, nombre + 'Dto');
         template = template.replace(/\$name/g, nombre);
         template = template.replace(/\$parametrosDtoToEntity/g, parametrosDtoToEntity);

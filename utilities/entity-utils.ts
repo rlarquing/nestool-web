@@ -65,7 +65,9 @@ export function generarColumna(atributo: any, databaseType: string = 'postgresql
         tipoTypeScript = 'Date';
     }
     const optionsString = opciones.length > 0 ? `{ ${opciones.join(', ')} }` : '';
-    return `@Column(${optionsString})\n    ${atributo.nombreAtributo}: ${tipoTypeScript};`;
+    // TS estricto (strictPropertyInitialization): requeridas llevan "!", nulables "?"
+    const marcador = atributo.nulo === true ? '?' : '!';
+    return `@Column(${optionsString})\n    ${atributo.nombreAtributo}${marcador}: ${tipoTypeScript};`;
 }
 
 export function aInicialMinuscula(str: string): string {
@@ -76,16 +78,17 @@ export function aInicialMinuscula(str: string): string {
 export function generarRelacion(atributo: any): string {
     const { tipoRelacion, rEntity, nombreAtributo } = atributo;
     const entityNameLower = rEntity.toLowerCase();
+    // "!" obligatoria: las relaciones no se asignan en el constructor (patron api-base)
     switch (tipoRelacion) {
         case 'OneToOne':
-            return `@OneToOne(() => ${rEntity})\n    @JoinColumn()\n    ${nombreAtributo}: ${rEntity};`;
+            return `@OneToOne(() => ${rEntity})\n    @JoinColumn()\n    ${nombreAtributo}!: ${rEntity};`;
         case 'OneToMany':
-            return `@OneToMany(() => ${rEntity}, ${entityNameLower} => ${entityNameLower}.${nombreAtributo})\n    ${nombreAtributo}: ${rEntity}[];`;
+            return `@OneToMany(() => ${rEntity}, ${entityNameLower} => ${entityNameLower}.${nombreAtributo})\n    ${nombreAtributo}!: ${rEntity}[];`;
         case 'ManyToOne':
-            return `@ManyToOne(() => ${rEntity}, ${entityNameLower} => ${entityNameLower}.${nombreAtributo})\n    @JoinColumn()\n    ${nombreAtributo}: ${rEntity};`;
+            return `@ManyToOne(() => ${rEntity}, ${entityNameLower} => ${entityNameLower}.${nombreAtributo})\n    @JoinColumn()\n    ${nombreAtributo}!: ${rEntity};`;
         case 'ManyToMany':
-            return `@ManyToMany(() => ${rEntity})\n    @JoinTable({\n        name: '${formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '_')}_${formatearNombre(eliminarSufijo(atributo.nombreAtributo, 'Entity'), '_')}',\n        joinColumn: {\n            name: '${formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '_')}_id',\n            referencedColumnName: 'id'\n        },\n        inverseJoinColumn: {\n            name: '${formatearNombre(eliminarSufijo(atributo.nombreAtributo, 'Entity'), '_')}_id',\n            referencedColumnName: 'id'\n        }\n    })\n    ${nombreAtributo}: ${rEntity}[];`;
+            return `@ManyToMany(() => ${rEntity})\n    @JoinTable({\n        name: '${formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '_')}_${formatearNombre(eliminarSufijo(atributo.nombreAtributo, 'Entity'), '_')}',\n        joinColumn: {\n            name: '${formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '_')}_id',\n            referencedColumnName: 'id'\n        },\n        inverseJoinColumn: {\n            name: '${formatearNombre(eliminarSufijo(atributo.nombreAtributo, 'Entity'), '_')}_id',\n            referencedColumnName: 'id'\n        }\n    })\n    ${nombreAtributo}!: ${rEntity}[];`;
         default:
-            return `@Column()\n    ${nombreAtributo}: ${rEntity};`;
+            return `@Column()\n    ${nombreAtributo}!: ${rEntity};`;
     }
 } 

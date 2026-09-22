@@ -153,7 +153,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
 
     // Renderizar el trigger
     const renderTrigger = () => {
-      if (multiple && selectedOption.length > 0) {
+      if (multiple && Array.isArray(selectedOption) && selectedOption.length > 0) {
         return (
           <div className="flex flex-wrap gap-1">
             {selectedOption.map((option) => (
@@ -178,7 +178,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
         )
       }
 
-      if (selectedOption && !multiple) {
+      if (selectedOption && !multiple && !Array.isArray(selectedOption)) {
         return renderSelected ? renderSelected(selectedOption) : selectedOption.label
       }
 

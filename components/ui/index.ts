@@ -15,7 +15,7 @@ export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectScro
 export { Separator } from './separator'
 export { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from './sheet'
 export { Skeleton } from './skeleton'
-export { Sonner } from './sonner'
+export { Toaster } from './sonner'
 export { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from './table'
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip'
 

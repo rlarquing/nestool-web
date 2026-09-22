@@ -7,7 +7,7 @@ const serviceTemplate = `import {Injectable} from '@nestjs/common';
 import {$nameEntity} from '../../persistence/entity';
 import {$nameRepository} from "../../persistence/repository";
 import {$nameMapper} from "../mapper";
-import {TrazaService} from "./traza.service";
+import {LogHistoryService} from "./log-history.service";
 import {GenericService} from "./generic.service";
 import { ConfigService } from '@nestjs/config';
 
@@ -17,9 +17,9 @@ export class $nameService extends GenericService<$nameEntity> {
         protected configService: ConfigService,
         protected $paramRepository: $nameRepository,
         protected $paramMapper: $nameMapper,
-        protected trazaService: TrazaService,
+        protected logHistoryService: LogHistoryService,
     ) {
-        super(configService, $paramRepository, $paramMapper, trazaService, $traza);
+        super(configService, $paramRepository, $paramMapper, logHistoryService, $traza);
     }
 }`;
 
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
         const nombreSinEntity = eliminarSufijo(entityName, 'Entity');
         const nombre = nombreSinEntity;
         const nombreLower = aInicialMinuscula(nombre);
+        // La clase real siempre termina en "Entity" (así la crea crear-entidad)
+        const entityClassName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         const serviceClassName = nombre + 'Service';
         const fileName = `${formatearNombre(nombre, '-')}.service.ts`;
         const filePath = path.join(serviceDir, fileName);
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
 
         // Preparar template
         let template = serviceTemplate;
-        template = template.replace(/\$nameEntity/g, entityName);
+        template = template.replace(/\$nameEntity/g, entityClassName);
         template = template.replace(/\$nameRepository/g, nombre + 'Repository');
         template = template.replace(/\$nameMapper/g, nombre + 'Mapper');
         template = template.replace(/\$name/g, nombre);

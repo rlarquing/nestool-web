@@ -73,12 +73,8 @@ export async function POST(req: NextRequest) {
                 // Generar código de relación
                 atributosCode.push(generarRelacion(atributo));
 
-                // Agregar parámetro al constructor
-                const tipoParametro = atributo.tipoRelacion === 'OneToMany' || atributo.tipoRelacion === 'ManyToMany' 
-                    ? `${atributo.rEntity}[]` 
-                    : atributo.rEntity;
-                parametrosConstructor.push(`${atributo.nombreAtributo}: ${tipoParametro}`);
-                thisAtributos.push(`this.${atributo.nombreAtributo} = ${atributo.nombreAtributo};`);
+                // Patrón api-base: las relaciones NO van en el constructor de la
+                // entidad (ver idioma.entity.ts); la asignación definitiva la cubre "!"
 
                 // --- NUEVO: Generar relación inversa en la entidad destino ---
                 try {
@@ -116,7 +112,7 @@ export async function POST(req: NextRequest) {
                             inversaDecorador = oneToManyTemplate.destino.replace('$entity', origenEntityName)
                                 .replace('($name)', `(${lowerOrigen})`)
                                 .replace('$nAtributo', atributo.nombreAtributo)
-                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}: ${origenEntityName}[];`);
+                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}!: ${origenEntityName}[];`);
                             inversaTypeormImports = 'OneToMany';
                             break;
                         case 'OneToMany':
@@ -124,14 +120,14 @@ export async function POST(req: NextRequest) {
                             inversaDecorador = manyToOneTemplate.origen.replace('$entity', origenEntityName)
                                 .replace('($name)', `(${lowerOrigen})`)
                                 .replace('$nAtributos', pluralize(atributo.nombreAtributo))
-                                .replace('$atributo', `${atributo.nombreAtributo}: ${origenEntityName};`);
+                                .replace('$atributo', `${atributo.nombreAtributo}!: ${origenEntityName};`);
                             inversaTypeormImports = 'ManyToOne, JoinColumn';
                             break;
                         case 'OneToOne':
                             // Inversa: OneToOne
                             inversaDecorador = oneToOneTemplate.origen.replace('$entity', origenEntityName)
                                 .replace('($name)', `(${lowerOrigen})`)
-                                .replace('$atributo', `${atributo.nombreAtributo}: ${origenEntityName};`);
+                                .replace('$atributo', `${atributo.nombreAtributo}!: ${origenEntityName};`);
                             inversaTypeormImports = 'OneToOne, JoinColumn';
                             break;
                         case 'ManyToMany':
@@ -139,7 +135,7 @@ export async function POST(req: NextRequest) {
                             inversaDecorador = manyToManyTemplate.destino.replace('$entity', origenEntityName)
                                 .replace('($entidad)', `(${lowerOrigen})`)
                                 .replace('$nAtributo', atributo.nombreAtributo)
-                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}: ${origenEntityName}[];`);
+                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}!: ${origenEntityName}[];`);
                             inversaTypeormImports = 'ManyToMany, JoinColumn';
                             break;
                         default:
@@ -190,7 +186,9 @@ export async function POST(req: NextRequest) {
         // El nombre de la clase y export SIEMPRE termina en Entity
         const className = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         let template = genericEntity;
-        template = template.replace('$typeorm', uniqueTypeormImports.join(', '));
+        // El template ya trae "Column, Entity" hardcodeados: solo pasamos los extras
+        const extras = uniqueTypeormImports.filter(i => i !== 'Column' && i !== 'Entity');
+        template = template.replace('$typeorm', extras.join(', '));
         template = template.replace('$entidad', formatearNombre(eliminarSufijo(entityName, 'Entity'), '_'));
         // Si la base de datos es postgres, usar schema, si no, quitarlo
         let entityDecorator = '';

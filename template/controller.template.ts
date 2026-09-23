@@ -1,4 +1,4 @@
-module.exports=`import {Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards} from '@nestjs/common';
+export const controllerTemplate = `import {Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards} from '@nestjs/common';
 import {$nameService} from '../../core/service';
 import {GetUser, IpAddress, Servicio, PaginationParams} from '../decorator';
 import {AuthGuard} from "@nestjs/passport";
@@ -14,7 +14,6 @@ import {GenericController} from "./generic.controller";
 import {BadRequestDto, BuscarDto, FiltroGenericoDto, ListadoDto, ResponseDto, Create$nameDto, Read$nameDto, UpdateMultiple$nameDto, Update$nameDto} from "../../shared/dto";
 import {RolGuard, PermissionGuard} from '../guard';
 import {PaginationParamsDto, PaginationService} from '../../shared/pagination';
-$import
 
 @ApiTags('$tag')
 @Controller('$paraCont')
@@ -36,7 +35,6 @@ export class $nameController extends GenericController<$nameEntity> {
     type: ListadoDto,
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elementos del conjunto no encontrados.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
@@ -60,7 +58,6 @@ return new ListadoDto(header, key, data);
     type: Read$nameDto,
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elemento del conjunto no encontrado.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
@@ -83,7 +80,6 @@ async findById(@Param('id', ParseIntPipe) id: number): Promise<Read$nameDto> {
     type: [Read$nameDto],
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elementos del conjunto no encontrados.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})

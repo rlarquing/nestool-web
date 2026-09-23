@@ -257,12 +257,12 @@ Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../sha
 - **Problema**: el parche a `persistence.module.ts` agrega la clase a `providers` y DESPUÉS chequea `if (!moduleContent.includes(repositoryClassName))` para `exports` — la condición ya es falsa tras el insert en providers → `exports` jamás se actualiza.
 - **Consecuencia**: el primer service que inyecte `XRepository` (fuera de PersistenceModule) → `Nest can't resolve dependencies` en bootstrap.
 - **Fix propuesto**: guardas independientes por array, o mejor: no parchear el module (ver F7-C2).
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). Se eliminó el parcheo de persistence.module.ts; el registro ahora alimenta forFeature/providers/exports vía el array dinámico. Verificado con tsc --noEmit sobre copia real de la api (0 errores nuevos).
 
 ### F7-C2 — 🔴 Parchea `persistence.module.ts` en vez del registro dinámico `persistence.service.ts`
 - **Problema**: la api registra repositories DINÁMICAMENTE: `export const repository = [...]` en `persistence.service.ts`, consumido por `forFeature([...entity])`, `providers: [...repository]` y `exports: [...repository]`. `crear-entidad` ya actualiza el array `entity` de ese registro, pero `crear-repository` NO actualiza el array `repository` y en su lugar mete la clase estáticamente en el module → doble fuente de verdad, fuera del modelo de la api.
 - **Fix propuesto**: agregar la clase a `export const repository = [...]` de `persistence.service.ts` (mismo patrón que `crear-entidad` usa para `entity`); no tocar `persistence.module.ts`.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). crear-repository ahora actualiza el import './repository' y el array `export const repository` de persistence.service.ts (mismo patrón probado de crear-entidad).
 
 ### F7-C3 — 🔴 Repos relacionales: faltan las inyecciones auxiliares y los helpers de resolución
 - **Problema**: el template solo inyecta su propio `Repository<XEntity>`. El modelo (`menu-traduccion.repository.ts`) inyecta además `Repository<MenuEntity>`/`Repository<IdiomaEntity>` y expone `findMenuById`/`findIdiomaById` (filtro `activo: true`) que el mapper usa para validar y 404 con i18n.
@@ -275,7 +275,7 @@ Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../sha
 - **Estado**: ⬜ pendiente
 
 ### F7-m1 — 🟢 `import {Repository }` con espacio extra; index sin espacios `{XRepository}` vs `{ XRepository }`; `super(repo, [])` con array vacío en vez de omitir el 2º argumento (aceptable, `relations?` opcional)
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). Import normalizado, `super(repo)` sin array vacío cuando no hay relaciones, index con formato { X }.
 
 ### ✅ Cumple
 Estructura del template correcta (`extends GenericRepository<X> implements IRepository<X>`, `@InjectRepository`, `super(repo, [relations])` con nombres de propiedad reales) · guard 409 · alta en `index.ts` · kebab-case.
@@ -289,12 +289,12 @@ Estructura del template correcta (`extends GenericRepository<X> implements IRepo
 ### F8-C1 — 🔴 El regex del parche no matchea `core.service.ts` real → el service NUNCA se registra
 - **Problema**: `providers:\s*\[([^\]]*)\]` busca `providers:` CON DOS PUNTOS; `core.service.ts` declara `export const providers = [...]` (con `=`). El match es null → no se agrega al array. Resultado: se añade el import (queda sin uso) y el service queda huérfano → DI failure al inyectarlo.
 - **Fix propuesto**: parchear el array real: regex `export const providers\s*=\s*\[([^\]]*)\]`, o registrar service+mapper con el mecanismo del F8-C2.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). Regex apuntado al array real `export const providers = [...]`; verificado en E2E (ProductoService en el array).
 
 ### F8-C2 — 🔴 Nadie registra el MAPPER en `core.service.ts` (brecha transversal con #6)
 - **Problema**: la api registra PARES `(XService, XMapper)` en `export const providers`. `crear-service` solo registra (intenta) el service; `crear-mapper` no toca `core.service.ts` → aunque F8-C1 se arregle, el mapper sigue sin registrar → `Nest can't resolve dependencies of the XService (?)`.
 - **Fix propuesto**: registrar el mapper junto al service (extender esta ruta o `crear-mapper`).
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). crear-mapper ahora registra el mapper (import + array) en core.service.ts; verificado en E2E (ProductoMapper).
 
 ### F8-M1 — 🟡 Parche regex frágil y doble fuente de verdad (mismo patrón que F7-C2)
 - **Problema**: `core.service.ts` es un array estático formateado por prettier; cualquier reformateo rompe el regex. La api consume `providers` desde `core.service.ts` — el generador no debería depender del formato exacto.
@@ -313,17 +313,17 @@ Template fiel al modelo (`extends GenericService<X>`, `super(configService, repo
 ### F9-C1 — 🔴 Placeholder `$import` jamás sustituido → `Cannot find name '$import'`
 - **Problema**: el template incluye una línea `$import` (línea ~22/17) que la ruta NUNCA reemplaza (no hay `replace(/\$import/g, ...)`) → el fichero generado contiene la expresión `$import` → TS2304.
 - **Fix propuesto**: eliminar la línea del template o sustituirla por cadena vacía.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). Línea $import eliminada del template (ruta + template/).
 
 ### F9-C2 — 🔴 Identificador en minúscula: `import {idiomaController}` vs clase exportada `IdiomaController`
 - **Problema**: el parche a `api.module.ts` usa `import {${nombreLower}Controller}` y agrega `${nombreLower}Controller` al array `controllers`, pero la clase generada es `IdiomaController` (ver `controllerClassName`) → "Module has no exported member 'idiomaController'" + referencia indefinida. `crear-service` no tiene este bug (usa `serviceClassName`).
 - **Fix propuesto**: usar `controllerClassName`.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). El parche usa controllerClassName (clase exportada real).
 
 ### F9-C3 — 🔴 Parchea `api.module.ts` estático en vez del registro dinámico `api.service.ts`
 - **Problema**: la api declara `controllers: [...controller]` consumiendo `export const controller = [...]` de `api.service.ts`. Aun arreglando F9-C2, meter la clase directo en el module duplica la fuente de verdad (mismo anti-patrón que F7-C2/F8-C1).
 - **Fix propuesto**: actualizar `export const controller = [...]` de `api.service.ts`.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 1). Se parchea `export const controller = [...]` de api.service.ts; api.module.ts ya no se toca. Verificado en E2E.
 
 ### F9-M1 — 🟡 `header == key` en ListadoDto: encabezados con claves crudas
 - **Problema**: el modelo separa `header = ['id','Codigo','Nombre','Defecto']` (labels) de `key = ['id','codigo','nombre','defecto']` (claves); el generador pone los nombres de atributo crudos en AMBOS → los listados muestran camelCase como encabezados.
@@ -402,3 +402,25 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 1. **F5-M2**: ¿adoptar sufijo `Id` en los campos de relación de DTOs (`menuId`) como la api, o mantener el nombre de propiedad?
 2. **F3-m1**: ¿prefijo de tabla `nom_` para nomencladores o tabla sin prefijo?
 3. **F1-M5/F2-M2**: ¿incluir relaciones dueñas (M:1/1:1) en el constructor de la entity como hace `menu-traduccion.entity.ts`?
+
+---
+
+## Fase de corrección — registro de avance
+
+### Lote 1 (cadena de registro) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F7-C1, F7-C2, F7-m1, F8-C1, F8-C2, F9-C1, F9-C2, F9-C3.
+- **Verificación E2E** (copia limpia de api-base + `bun install` + `tsc --noEmit` baseline vs post-generación):
+  - Generado CRUD completo de `Producto` (entity simple, 4 columnas) vía `/api/crear-entidad` + `/api/crear-crud-completo`.
+  - **0 errores nuevos en `src/`** (baseline tenía solo errores preexistentes en `test/` por supertest+node types).
+  - Registros verificados: `ProductoRepository` en `export const repository` (persistence.service.ts), `ProductoService`+`ProductoMapper` en `export const providers` (core.service.ts), `ProductoController` en `export const controller` (api.service.ts).
+  - NOTA: el arranque runtime de la api requiere PostgreSQL (no disponible en el sandbox); la paridad de registro con las slices propias de la api + compilación estricta es la evidencia de esta fase.
+- **Extras corregidos fuera de los ítems originales**:
+  - **F9-C4 (nuevo, 🔴→✅)**: `@ApiNotFoundResponse({ status: 404, ... })` — Swagger 11 no acepta `status` en ese decorador (`ApiResponseNoStatusOptions`) → error de compilación. La api real lo usa SIN status. Corregido en template (3 bloques).
+  - **F1-C6 (nuevo, 🔴→✅)**: `SchemaEnum.${esquema}` pasaba el valor en minúsculas (`SchemaEnum.public` no existe → TS2551). Ahora se uppercasea con fallback `PUBLIC`.
+  - **UI (fuera de alcance, 🔴→✅)**: importación circular `localdb/entity/generic.repository.ts → localdb/db.ts → localdb/entity` (TDZ `GenericRepository before initialization`) dejaba la home del generador en 500. Roto el ciclo quitando el import de entidades de db.ts.
+
+### 🔐 SEC-1 — 🔴 Credenciales reales trackeadas en el repo api-base (fuera del generador)
+- **Fichero**: `api-base-nestjs/.env.local` (trackeado en git; `.gitignore` solo excluye `.env`).
+- **Problema**: contiene `EMAIL_ID=rlarquing@gmail.com` + `EMAIL_PASS=<app password de Gmail de 16 chars>` en el historial y HEAD del repo público/privado de GitHub.
+- **Acción requerida del propietario**: (1) revocar YA esa app password en la cuenta Google; (2) `git rm --cached .env.local` + añadir `.env.local`/`.env*` a `.gitignore`; (3) purgar el fichero del historial (`git filter-repo` / BFG) y rotar cualquier otra credencial del fichero.
+- **Estado**: ⬜ pendiente (requiere decisión/acción del propietario; tocar historial es destructivo)

@@ -19,7 +19,6 @@ import {GenericController} from "./generic.controller";
 import {BadRequestDto, BuscarDto, FiltroGenericoDto, ListadoDto, ResponseDto, Create$nameDto, Read$nameDto, UpdateMultiple$nameDto, Update$nameDto} from "../../shared/dto";
 import {RolGuard, PermissionGuard} from '../guard';
 import {PaginationParamsDto, PaginationService} from '../../shared/pagination';
-$import
 
 @ApiTags('$tag')
 @Controller('$paraCont')
@@ -41,7 +40,6 @@ export class $nameController extends GenericController<$nameEntity> {
     type: ListadoDto,
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elementos del conjunto no encontrados.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
@@ -65,7 +63,6 @@ return new ListadoDto(header, key, data);
     type: Read$nameDto,
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elemento del conjunto no encontrado.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
@@ -88,7 +85,6 @@ async findById(@Param('id', ParseIntPipe) id: number): Promise<Read$nameDto> {
     type: [Read$nameDto],
 })
 @ApiNotFoundResponse({
-    status: 404,
     description: 'Elementos del conjunto no encontrados.',
 })
 @ApiResponse({status: 401, description: 'Sin autorizacion.'})
@@ -304,44 +300,52 @@ export async function POST(req: NextRequest) {
         // Escribir archivo
         writeFileSync(filePath, template);
 
-        // Actualizar index.ts
+        // Actualizar index.ts (formato con espacios, igual al de la api)
         const indexPath = path.join(entityDir, 'index.ts');
-        const exportStatement = `export {${controllerClassName}} from './${formatearNombre(nombre, '-')}.controller';\n`;
+        const exportStatement = `export { ${controllerClassName} } from './${formatearNombre(nombre, '-')}.controller';\n`;
         
         if (existsSync(indexPath)) {
             const indexContent = readFileSync(indexPath, 'utf-8');
-            if (!indexContent.includes(`export {${controllerClassName}}`)) {
+            if (!indexContent.includes(`export { ${controllerClassName} }`)) {
                 writeFileSync(indexPath, indexContent + exportStatement);
             }
         } else {
             writeFileSync(indexPath, exportStatement);
         }
 
-        // Actualizar api.module.ts
-        const modulePath = path.join(basePath, 'src/api/api.module.ts');
-        if (existsSync(modulePath)) {
-            let moduleContent = readFileSync(modulePath, 'utf-8');
-            
-            // Agregar import del controller si no existe
-            const controllerImport = `import {${nombreLower}Controller} from './controller/${formatearNombre(nombre, '-')}.controller';`;
-            if (!moduleContent.includes(controllerImport)) {
-                // Insertar después del último import
-                const lastImportIndex = moduleContent.lastIndexOf('import ');
-                const lastImportEnd = moduleContent.indexOf('\n', lastImportIndex) + 1;
-                moduleContent = moduleContent.slice(0, lastImportEnd) + controllerImport + '\n' + moduleContent.slice(lastImportEnd);
+        // --- ACTUALIZAR api.service.ts (registro dinámico de controllers) ---
+        // api.module.ts consume `export const controller = [...]` desde api.service.ts;
+        // NO se debe parchear api.module.ts directamente.
+        const apiServicePath = path.join(basePath, 'src/api/api.service.ts');
+        if (existsSync(apiServicePath)) {
+            let serviceContent = readFileSync(apiServicePath, 'utf-8');
+
+            // 1. Agregar la clase al import existente desde './controller' si no está
+            //    (el nombre SIEMPRE es el de la clase exportada: controllerClassName)
+            const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/controller['"];?/;
+            if (importRegex.test(serviceContent)) {
+                serviceContent = serviceContent.replace(importRegex, (match, imports) => {
+                    let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!importList.includes(controllerClassName)) importList.push(controllerClassName);
+                    importList = Array.from(new Set(importList));
+                    return `import { ${importList.join(', ')} } from "./controller";`;
+                });
+            } else {
+                serviceContent = `import { ${controllerClassName} } from "./controller";\n` + serviceContent;
             }
 
-            // Agregar al array de controllers
-            if (!moduleContent.includes(`${nombreLower}Controller`)) {
-                const controllerArrayMatch = moduleContent.match(/controllers:\s*\[([^\]]*)\]/);
-                if (controllerArrayMatch) {
-                    const currentArray = controllerArrayMatch[1];
-                    const newArray = currentArray ? `${currentArray.trim()}, ${nombreLower}Controller` : `${nombreLower}Controller`;
-                    moduleContent = moduleContent.replace(controllerArrayMatch[0], `controllers: [${newArray}]`);
-                }
+            // 2. Agregar al array 'controller' si no está
+            const controllerArrayRegex = /export\s+const\s+controller\s*=\s*\[([^\]]*)\]/;
+            if (controllerArrayRegex.test(serviceContent)) {
+                serviceContent = serviceContent.replace(controllerArrayRegex, (match, items) => {
+                    let itemList = items.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!itemList.includes(controllerClassName)) itemList.push(controllerClassName);
+                    itemList = Array.from(new Set(itemList));
+                    return `export const controller = [${itemList.join(', ')}]`;
+                });
             }
-            
-            writeFileSync(modulePath, moduleContent);
+
+            writeFileSync(apiServicePath, serviceContent);
         }
 
         return NextResponse.json({ 

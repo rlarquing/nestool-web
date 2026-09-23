@@ -1,10 +1,11 @@
 import Dexie from 'dexie'
-import {RutaEntity} from "./entity";
 
+// NOTA: no importar entidades aquí (rompería el ciclo entity -> generic.repository -> db).
+// Schema solo necesita la FORMA de las tablas; se usan literales planos con las mismas keys.
 export class Schema {
- ruta: RutaEntity;
+  ruta: { id: number; ruta: string };
   constructor () {
-this.ruta=new RutaEntity();
+    this.ruta = { id: 0, ruta: '' };
   }
 }
 

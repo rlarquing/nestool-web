@@ -104,17 +104,50 @@ export async function POST(req: NextRequest) {
         // Escribir archivo
         writeFileSync(filePath, template);
 
-        // Actualizar index.ts
+        // Actualizar index.ts (formato con espacios, igual al de la api)
         const indexPath = path.join(mapperDir, 'index.ts');
-        const exportStatement = `export {${mapperClassName}} from './${formatearNombre(nombre, '-')}.mapper';\n`;
+        const exportStatement = `export { ${mapperClassName} } from './${formatearNombre(nombre, '-')}.mapper';\n`;
         
         if (existsSync(indexPath)) {
             const indexContent = readFileSync(indexPath, 'utf-8');
-            if (!indexContent.includes(`export {${mapperClassName}}`)) {
+            if (!indexContent.includes(`export { ${mapperClassName} }`)) {
                 writeFileSync(indexPath, indexContent + exportStatement);
             }
         } else {
             writeFileSync(indexPath, exportStatement);
+        }
+
+        // --- ACTUALIZAR core.service.ts (la api registra PARES service+mapper en providers) ---
+        // Si el mapper no se registra, el service no puede resolverlo (DI failure).
+        const coreServicePath = path.join(basePath, 'src/core/core.service.ts');
+        if (existsSync(coreServicePath)) {
+            let coreContent = readFileSync(coreServicePath, 'utf-8');
+
+            // 1. Agregar la clase al import existente desde './mapper' si no está
+            const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/mapper['"];?/;
+            if (importRegex.test(coreContent)) {
+                coreContent = coreContent.replace(importRegex, (match, imports) => {
+                    let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!importList.includes(mapperClassName)) importList.push(mapperClassName);
+                    importList = Array.from(new Set(importList));
+                    return `import { ${importList.join(', ')} } from './mapper';`;
+                });
+            } else {
+                coreContent = `import { ${mapperClassName} } from './mapper';\n` + coreContent;
+            }
+
+            // 2. Agregar al array 'providers' si no está
+            const providersArrayRegex = /export\s+const\s+providers\s*=\s*\[([^\]]*)\]/;
+            if (providersArrayRegex.test(coreContent)) {
+                coreContent = coreContent.replace(providersArrayRegex, (match, items) => {
+                    let itemList = items.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!itemList.includes(mapperClassName)) itemList.push(mapperClassName);
+                    itemList = Array.from(new Set(itemList));
+                    return `export const providers = [${itemList.join(', ')}]`;
+                });
+            }
+
+            writeFileSync(coreServicePath, coreContent);
         }
 
         return NextResponse.json({ 

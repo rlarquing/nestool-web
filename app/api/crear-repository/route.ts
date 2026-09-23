@@ -3,18 +3,20 @@ import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { formatearNombre, eliminarSufijo, aInicialMinuscula } from '@/utilities/entity-utils';
 
-const repositoryTemplate = `import {Injectable} from "@nestjs/common";
-import {GenericRepository} from "./generic.repository";
-import {IRepository} from "../../shared/interface";
-import {InjectRepository} from "@nestjs/typeorm";
-import {Repository } from "typeorm";
-import { $nameEntity } from "../entity";
+const repositoryTemplate = `import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { GenericRepository } from './generic.repository';
+import { IRepository } from '../../shared/interface';
+import { $nameEntity } from '../entity';
 
 @Injectable()
-export class $nameRepository extends GenericRepository<$nameEntity> implements IRepository<$nameEntity>{
-    constructor( @InjectRepository($nameEntity)
-                 private $paramRepository: Repository<$nameEntity>){
-        super($paramRepository,[$relations]);
+export class $nameRepository extends GenericRepository<$nameEntity> implements IRepository<$nameEntity> {
+    constructor(
+        @InjectRepository($nameEntity)
+        private $paramRepository: Repository<$nameEntity>,
+    ) {
+        super($paramRepository$superArgs);
     }
 
 }`;
@@ -102,59 +104,60 @@ export async function POST(req: NextRequest) {
         template = template.replace(/\$nameEntity/g, entityClassName);
         template = template.replace(/\$name/g, nombre);
         template = template.replace(/\$param/g, nombreLower);
-        template = template.replace(/\$relations/g, relaciones.length > 0 ? relaciones.join(', ') : '');
+        // El 2º argumento de super() (relations) es opcional: se omite si no hay relaciones
+        const superArgs = relaciones.length > 0 ? `, [${relaciones.join(', ')}]` : '';
+        template = template.replace(/\$superArgs/g, superArgs);
 
         // Escribir archivo
         writeFileSync(filePath, template);
 
-        // Actualizar index.ts
+        // Actualizar index.ts (formato con espacios, igual al de la api)
         const indexPath = path.join(repositoryDir, 'index.ts');
-        const exportStatement = `export {${repositoryClassName}} from './${formatearNombre(nombre, '-')}.repository';\n`;
+        const exportStatement = `export { ${repositoryClassName} } from './${formatearNombre(nombre, '-')}.repository';\n`;
         
         if (existsSync(indexPath)) {
             const indexContent = readFileSync(indexPath, 'utf-8');
-            if (!indexContent.includes(`export {${repositoryClassName}}`)) {
+            if (!indexContent.includes(`export { ${repositoryClassName} }`)) {
                 writeFileSync(indexPath, indexContent + exportStatement);
             }
         } else {
             writeFileSync(indexPath, exportStatement);
         }
 
-        // Actualizar persistence.module.ts
-        const modulePath = path.join(basePath, 'src/persistence/persistence.module.ts');
-        if (existsSync(modulePath)) {
-            let moduleContent = readFileSync(modulePath, 'utf-8');
-            
-            // Agregar import del repository si no existe
-            const repositoryImport = `import {${repositoryClassName}} from './repository/${formatearNombre(nombre, '-')}.repository';`;
-            if (!moduleContent.includes(repositoryImport)) {
-                // Insertar después del último import
-                const lastImportIndex = moduleContent.lastIndexOf('import ');
-                const lastImportEnd = moduleContent.indexOf('\n', lastImportIndex) + 1;
-                moduleContent = moduleContent.slice(0, lastImportEnd) + repositoryImport + '\n' + moduleContent.slice(lastImportEnd);
+        // --- ACTUALIZAR persistence.service.ts (registro dinámico de repositories) ---
+        // persistence.module.ts consume `export const repository = [...]` (forFeature,
+        // providers y exports usan ese mismo array). NO se debe parchear
+        // persistence.module.ts directamente: el registro vive en persistence.service.ts.
+        const servicePath = path.join(basePath, 'src/persistence/persistence.service.ts');
+        if (existsSync(servicePath)) {
+            let serviceContent = readFileSync(servicePath, 'utf-8');
+
+            // 1. Agregar la clase al import existente desde './repository' si no está
+            const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/repository['"];?/;
+            if (importRegex.test(serviceContent)) {
+                serviceContent = serviceContent.replace(importRegex, (match, imports) => {
+                    let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!importList.includes(repositoryClassName)) importList.push(repositoryClassName);
+                    importList = Array.from(new Set(importList));
+                    return `import { ${importList.join(', ')} } from './repository';`;
+                });
+            } else {
+                serviceContent = `import { ${repositoryClassName} } from './repository';\n` + serviceContent;
             }
 
-            // Agregar al array de providers
-            if (!moduleContent.includes(repositoryClassName)) {
-                const providerArrayMatch = moduleContent.match(/providers:\s*\[([^\]]*)\]/);
-                if (providerArrayMatch) {
-                    const currentArray = providerArrayMatch[1];
-                    const newArray = currentArray ? `${currentArray.trim()}, ${repositoryClassName}` : `${repositoryClassName}`;
-                    moduleContent = moduleContent.replace(providerArrayMatch[0], `providers: [${newArray}]`);
-                }
+            // 2. Agregar al array 'repository' si no está
+            //    (esto lo registra en providers, exports Y deja la entity disponible en forFeature)
+            const repositoryArrayRegex = /export\s+const\s+repository\s*=\s*\[([^\]]*)\]/;
+            if (repositoryArrayRegex.test(serviceContent)) {
+                serviceContent = serviceContent.replace(repositoryArrayRegex, (match, items) => {
+                    let itemList = items.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!itemList.includes(repositoryClassName)) itemList.push(repositoryClassName);
+                    itemList = Array.from(new Set(itemList));
+                    return `export const repository = [${itemList.join(', ')}]`;
+                });
             }
-            
-            // Agregar al array de exports
-            if (!moduleContent.includes(`${repositoryClassName}`)) {
-                const exportArrayMatch = moduleContent.match(/exports:\s*\[([^\]]*)\]/);
-                if (exportArrayMatch) {
-                    const currentArray = exportArrayMatch[1];
-                    const newArray = currentArray ? `${currentArray.trim()}, ${repositoryClassName}` : `${repositoryClassName}`;
-                    moduleContent = moduleContent.replace(exportArrayMatch[0], `exports: [${newArray}]`);
-                }
-            }
-            
-            writeFileSync(modulePath, moduleContent);
+
+            writeFileSync(servicePath, serviceContent);
         }
 
         return NextResponse.json({ 

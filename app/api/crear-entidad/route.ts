@@ -192,13 +192,14 @@ export async function POST(req: NextRequest) {
         template = template.replace('$entidad', formatearNombre(eliminarSufijo(entityName, 'Entity'), '_'));
         // Si la base de datos es postgres, usar schema, si no, quitarlo
         let entityDecorator = '';
+        const esquemaEnum = (esquema || 'public').toString().toUpperCase();
         if ((databaseType || '').toLowerCase() === 'postgresql' || (databaseType || '').toLowerCase() === 'postgres') {
-            entityDecorator = `@Entity('${formatearNombre(eliminarSufijo(entityName, 'Entity'), '_')}', { schema: SchemaEnum.${esquema || 'public'} })`;
+            entityDecorator = `@Entity('${formatearNombre(eliminarSufijo(entityName, 'Entity'), '_')}', { schema: SchemaEnum.${esquemaEnum} })`;
         } else {
             entityDecorator = `@Entity('${formatearNombre(eliminarSufijo(entityName, 'Entity'), '_')}')`;
         }
         template = template.replace('@Entity(\'$entidad\', { schema: SchemaEnum.$schema })', entityDecorator);
-        template = template.replace('$schema', esquema || 'public');
+        template = template.replace('$schema', esquemaEnum);
         template = template.replace('$atributos', atributosCode.join('\n\n    '));
         template = template.replace('$parametros', parametrosConstructor.join(', '));
         template = template.replace('$thisAtributos', thisAtributos.join('\n        '));

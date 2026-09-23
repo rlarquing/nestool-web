@@ -71,43 +71,50 @@ export async function POST(req: NextRequest) {
         // Escribir archivo
         writeFileSync(filePath, template);
 
-        // Actualizar index.ts
+        // Actualizar index.ts (formato con espacios, igual al de la api)
         const indexPath = path.join(serviceDir, 'index.ts');
-        const exportStatement = `export {${serviceClassName}} from './${formatearNombre(nombre, '-')}.service';\n`;
+        const exportStatement = `export { ${serviceClassName} } from './${formatearNombre(nombre, '-')}.service';\n`;
         
         if (existsSync(indexPath)) {
             const indexContent = readFileSync(indexPath, 'utf-8');
-            if (!indexContent.includes(`export {${serviceClassName}}`)) {
+            if (!indexContent.includes(`export { ${serviceClassName} }`)) {
                 writeFileSync(indexPath, indexContent + exportStatement);
             }
         } else {
             writeFileSync(indexPath, exportStatement);
         }
 
-        // Actualizar core.service.ts
+        // --- ACTUALIZAR core.service.ts (registro dinámico de providers de core) ---
+        // core.module.ts consume `export const providers = [...]` desde core.service.ts;
+        // el fichero real declara el array con "=" (no es un objeto Module).
         const coreServicePath = path.join(basePath, 'src/core/core.service.ts');
         if (existsSync(coreServicePath)) {
             let coreContent = readFileSync(coreServicePath, 'utf-8');
-            
-            // Agregar import del service si no existe
-            const serviceImport = `import {${serviceClassName}} from './service/${formatearNombre(nombre, '-')}.service';`;
-            if (!coreContent.includes(serviceImport)) {
-                // Insertar después del último import
-                const lastImportIndex = coreContent.lastIndexOf('import ');
-                const lastImportEnd = coreContent.indexOf('\n', lastImportIndex) + 1;
-                coreContent = coreContent.slice(0, lastImportEnd) + serviceImport + '\n' + coreContent.slice(lastImportEnd);
+
+            // 1. Agregar la clase al import existente desde './service' si no está
+            const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/service['"];?/;
+            if (importRegex.test(coreContent)) {
+                coreContent = coreContent.replace(importRegex, (match, imports) => {
+                    let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!importList.includes(serviceClassName)) importList.push(serviceClassName);
+                    importList = Array.from(new Set(importList));
+                    return `import { ${importList.join(', ')} } from './service';`;
+                });
+            } else {
+                coreContent = `import { ${serviceClassName} } from './service';\n` + coreContent;
             }
 
-            // Agregar al array de providers
-            if (!coreContent.includes(serviceClassName)) {
-                const providerArrayMatch = coreContent.match(/providers:\s*\[([^\]]*)\]/);
-                if (providerArrayMatch) {
-                    const currentArray = providerArrayMatch[1];
-                    const newArray = currentArray ? `${currentArray.trim()}, ${serviceClassName}` : `${serviceClassName}`;
-                    coreContent = coreContent.replace(providerArrayMatch[0], `providers: [${newArray}]`);
-                }
+            // 2. Agregar al array 'providers' si no está
+            const providersArrayRegex = /export\s+const\s+providers\s*=\s*\[([^\]]*)\]/;
+            if (providersArrayRegex.test(coreContent)) {
+                coreContent = coreContent.replace(providersArrayRegex, (match, items) => {
+                    let itemList = items.split(',').map((i: string) => i.trim()).filter(Boolean);
+                    if (!itemList.includes(serviceClassName)) itemList.push(serviceClassName);
+                    itemList = Array.from(new Set(itemList));
+                    return `export const providers = [${itemList.join(', ')}]`;
+                });
             }
-            
+
             writeFileSync(coreServicePath, coreContent);
         }
 

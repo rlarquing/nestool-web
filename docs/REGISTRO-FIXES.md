@@ -171,7 +171,7 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 - **Problema**: `generarAtributoDto()` caso `esOpcional` emite `detalle?: string` con `@IsString` pero **sin** `@IsOptional()` → class-validator rechaza el campo ausente ("debe ser un texto") aunque nadie lo envíe.
 - **Evidencia**: `detalle?: string` con solo `@IsString` en el DTO generado.
 - **Fix propuesto**: emitir `@IsOptional()` (e importarlo) para `esOpcional` y `esNulo`.
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 2). generarAtributoDto emite @IsOptional() e importa IsOptional para esOpcional y esNulo. E2E: ComentarioDto con 'detalle?: string' opcional correcto.
 
 ### F4-m1 — 🟢 Opcionales con `@ApiProperty` en vez de `@ApiPropertyOptional` (la api usa este último); indentación de 1 espacio; sin `example` coherente por tipo
 - **Estado**: ⬜ pendiente
@@ -190,18 +190,18 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 - **Evidencia**: `create-pivot.dto.ts` importa `{IsOptional, IsNumber}` y usa `@IsNotEmpty()` dos veces → `Cannot find name 'IsNotEmpty'`.
 - **Modelo api-base** (`create-menu-traduccion.dto.ts`): `menuId!: number` lleva `@IsNotEmpty()` + `@IsNumber()` y el import correspondiente.
 - **Fix propuesto**: quitar la exclusión de relaciones en la condición del import (las relaciones requeridas también necesitan IsNotEmpty).
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 2). Eliminada la exclusión de relaciones del set de imports: las relaciones requeridas también registran IsNotEmpty. E2E: create-tarea.dto.ts importa y usa @IsNotEmpty().
 
 ### F5-C2 — 🔴 Relación a nomenclador: `campo!: ReadNomencladorDto` sin import y contra la convención de ids
 - **Problema**: `generateCrudAttributes` convierte relaciones hacia entities con `MOD_NOMENCLATOR` al tipo `ReadNomencladorDto`, pero **nunca inyecta su import** (el import solo se añade cuando la ENTITY completa es nomencladora) → no compila. Además la api **no usa** `ReadNomencladorDto` en ningún Create/Update DTO: la convención es por **id**.
 - **Evidencia**: `estado!: ReadNomencladorDto` en create y update de Tarea (4 ficheros afectados).
 - **Fix propuesto**: tratar las relaciones a nomenclador igual que las demás: `number` (M:1/1:1) o `number[]` (M:N).
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 2). Las relaciones a nomencladores ahora son ids (number/number[]) como el resto; ReadNomencladorDto ya no aparece en ningún Create/Update. E2E: estado!: number en los 4 DTOs de Tarea (0 apariciones de ReadNomencladorDto).
 
 ### F5-M1 — 🟡 Update DTO "todo opcional" cuando el modelo mantiene los requeridos
 - **Problema**: el generador emite todos los campos con `@IsOptional()`; la api (`update-idioma.dto.ts`, `update-menu-traduccion.dto.ts`) mantiene `@IsNotEmpty` en los campos requeridos del create (semántica PUT).
 - **Fix propuesto**: replicar la opcionalidad del create en el update (solo opcionales reales quedan `?`).
-- **Estado**: ⬜ pendiente
+✅ **Estado**: CORREGIDO (fase 2). El update replica la opcionalidad del create (campos requeridos con @IsNotEmpty). E2E: update-tarea.dto.ts mantiene titulo/producto/estado requeridos.
 
 ### F5-M2 — 🟡 Nomenclatura de relaciones: `menu!: number` vs `menuId!: number` del modelo
 - **Problema**: la api nombra los ids de relación con sufijo `Id` (`menuId`, `idiomaId`, `roles`); el generador usa el nombre de propiedad de la entity. Coherente internamente, pero rompe la convención documental y de Swagger de la api.
@@ -347,6 +347,11 @@ Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `P
 
 **Veredicto: NO CUMPLE como orquestador: encadena 5 generadores rotos y reporta éxito sin verificar.**
 
+### F5-C3 — 🔴→✅ El parser pierde atributos nulables con unión `T | null` (nuevo, detectado en E2E de fase 2)
+- **Problema**: el regex de propiedades de `parseEntityAttributes` no aceptaba `nota?: string | null;` → los atributos nulables desaparecían SILENCIOSAMENTE de los 4 DTOs (pérdida de campos).
+- **Fix aplicado**: regex extendido a `(?:\s*\|\s*null)?` + `mapTypeScriptType` normaliza la unión al tipo base.
+- ✅ **Estado**: CORREGIDO (fase 2). E2E: `nota?: string` presente en create/update/read de Tarea.
+
 ### F10-C1 — 🔴 Reporta `success: true` (200) aunque la api quede sin compilar
 - **Problema**: cada sub-ruta solo valida la ESCRITURA de ficheros; no hay verificación posterior (parseo TS, `tsc --noEmit`). Con F5/F6/F7/F8/F9 activos, un flujo "exitoso" entrega una api que no compila ni arranca, y el usuario ve "CRUD completo creado exitosamente".
 - **Fix propuesto**: tras generar, validar (parsear los ficheros tocados como mínimo; ideal `tsc --noEmit`) y reportar el estado REAL; fallar si algo no parsea.
@@ -424,3 +429,13 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 - **Problema**: contiene `EMAIL_ID=rlarquing@gmail.com` + `EMAIL_PASS=<app password de Gmail de 16 chars>` en el historial y HEAD del repo público/privado de GitHub.
 - **Acción requerida del propietario**: (1) revocar YA esa app password en la cuenta Google; (2) `git rm --cached .env.local` + añadir `.env.local`/`.env*` a `.gitignore`; (3) purgar el fichero del historial (`git filter-repo` / BFG) y rotar cualquier otra credencial del fichero.
 - **Estado**: ⬜ pendiente (requiere decisión/acción del propietario; tocar historial es destructivo)
+
+---
+
+### Lote 2 (DTOs) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F4-C1, F5-C1, F5-C2, F5-M1 + **F5-C3** (nuevo, hallado en E2E: atributos `T | null` se perdían en el parser).
+- **Verificación E2E** (mismo banco: copia de api-base con Producto CRUD ya generado):
+  - Entidades de prueba api-style: `EstadoEntity` (nomenclador, MOD_NOMENCLATOR) y `TareaEntity` (titulo + ManyToOne a Producto y Estado + nota nullable).
+  - DTOs CRUD de Tarea regenerados: relaciones por id (`producto!: number`, `estado!: number`), IsNotEmpty importado/usado, update con opcionalidad del create, `nota` presente.
+  - Modo `nuevo`: ComentarioDto emite @IsOptional importado para el campo opcional.
+  - `tsc --noEmit`: **0 errores nuevos en `src/`**.

@@ -44,7 +44,8 @@ function parseEntityAttributes(content: string): any[] {
     
     // Segunda pasada: encontrar propiedades reales (que vienen DESPUÉS de un decorador)
     // Una propiedad tiene el formato: nombre!: tipo; o nombre: tipo; o nombre?: tipo;
-    const propertyRegex = /^(\w+)([!]+)?(?:\?)?\s*:\s*(\w+(?:\[\])?)\s*;?$/;
+    // También acepta la unión con null usada por el TS estricto: nombre?: tipo | null;
+    const propertyRegex = /^(\w+)([!]+)?(?:\?)?\s*:\s*(\w+(?:\[\])?(?:\s*\|\s*null)?)\s*;?$/;
     
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex].trim();
@@ -146,6 +147,8 @@ function parseEntityAttributes(content: string): any[] {
   }
   
   function mapTypeScriptType(tsType: string): string {
+    // Normalizar la unión "T | null" (TS estricto) al tipo base
+    const base = tsType.split('|')[0].trim();
     const typeMap: { [key: string]: string } = {
       "string": "string",
       "number": "number",
@@ -154,7 +157,7 @@ function parseEntityAttributes(content: string): any[] {
       "Timestamp": "Timestamp",
       "Geometry": "Geometry",
     };
-    return typeMap[tsType] || "string";
+    return typeMap[base] || "string";
   }
 
 // Templates para DTOs
@@ -246,11 +249,15 @@ function generarAtributoDto(atributo: AtributoDto): {
             atributoStr = ` ${atributo.nombreAtributo}!: ${tipo};`;
             break;
         case 'esOpcional':
+            validadores.push('IsOptional');
+            codigoValidadores += ' @IsOptional()\n';
             atributoStr = ` ${atributo.nombreAtributo}?: ${tipo};`;
             break;
         case 'esNulo':
         default:
-            atributoStr = ` ${atributo.nombreAtributo}: ${tipo} | null;`;
+            validadores.push('IsOptional');
+            codigoValidadores += ' @IsOptional()\n';
+            atributoStr = ` ${atributo.nombreAtributo}?: ${tipo} | null;`;
             break;
     }
     
@@ -332,18 +339,18 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
             const esNom = esNomenclador(basePath, attr.rEntity);
             if (esNom) {
                 relacionesNomenclador.push(attr.nombreAtributo);
-                dtoType = 'ReadNomencladorDto';
-            } else {
-                // Convención de la api-base: las relaciones se expresan por id
-                // (ver create-user.dto.ts: roles!: number[]) — nunca importando la entity
-                dtoType = (attr.tipoRelacion === 'OneToMany' || attr.tipoRelacion === 'ManyToMany')
-                    ? 'number[]'
-                    : 'number';
             }
+            // Convención de la api-base: TODAS las relaciones (incluidas las que apuntan
+            // a nomencladores) se expresan por id — nunca con ReadNomencladorDto
+            // (ver create-user.dto.ts: roles!: number[]; create-menu-traduccion.dto.ts: menuId!: number)
+            dtoType = (attr.tipoRelacion === 'OneToMany' || attr.tipoRelacion === 'ManyToMany')
+                ? 'number[]'
+                : 'number';
         }
 
-        // Generar validadores según nullable
-        if (attr.nulo === false && !tipo.startsWith('relation')) {
+        // Generar validadores según nullable (las relaciones requeridas TAMBIÉN
+        // necesitan IsNotEmpty en el create, como en la api-base)
+        if (attr.nulo === false) {
             validadoresSet.add('IsNotEmpty');
         }
         // Los templates siempre emiten @IsOptional(), garantizar el import
@@ -385,8 +392,13 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
             createAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
         }
 
-        // UPDATE DTO - todos opcionales
-        updateAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+        // UPDATE DTO - misma opcionalidad que el create (modelo api-base:
+        // update-idioma.dto.ts mantiene @IsNotEmpty en los campos requeridos)
+        if (attr.nulo === false) {
+            updateAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}!: ${dtoType};`);
+        } else {
+            updateAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+        }
 
         // READ DTO - incluir todos (declaraciones y parámetros opcionales para que
         // el constructor positional del mapper siempre compile). Sin validadores:

@@ -216,13 +216,186 @@ Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según 
 
 ---
 
-## Pendiente de auditar (se registrará aquí)
+## Función 6 — Crear mapper (`/api/crear-mapper`)
 
-- [ ] Función 6 — Crear mapper
-- [ ] Función 7 — Crear repository
-- [ ] Función 8 — Crear service
-- [ ] Función 9 — Crear controlador
-- [ ] Función 10 — CRUD completo (orquestador)
+**Veredicto: NO CUMPLE para entidades con relaciones; el camino de columnas simples funciona.**
+
+### F6-C1 — 🔴 Entidades con relaciones: mapper inservible (constructor incompleto, sin resolución de relaciones)
+- **Problema**: la ruta usa un template inline "simple" cuyos parámetros salen SOLO de los `@Column`. Para una entidad relacional estilo `menu-traduccion` genera `new MenuTraduccionEntity(createDto.label)` cuando el constructor de la entity requiere `(menu, idioma, label)` → `Expected 3 arguments`. Además no resuelve relaciones (ni valida 404 con i18n) ni mapea `entity.menu?.id` en el Read.
+- **Modelo api-base** (`menu-traduccion.mapper.ts`): inyecta su PROPIO repository y resuelve con `findMenuById`/`findIdiomaById` + `NotFoundException(traducir(...))`; `entityToDto` mapea ids (`entity.menu?.id`).
+- **Fix propuesto**: detectar relaciones en la entity; usar la rama relacional (inyección de repos + helpers + NotFound i18n + mapeo por id); template simple solo para entidades puras.
+- **Estado**: ⬜ pendiente
+
+### F6-C2 — 🔴 El template relacional (`mepperRelacion`) es código muerto; la ruta duplica el template simple inline
+- **Problema**: `template/mapper.template.ts` exporta `mepperSinRelacion`/`mepperRelacion` (con typo "mepper") pero la ruta **nunca lo importa**: tiene su propia copia inline del template simple. El template con soporte de relaciones (inyección de repos) jamás se usa → riesgo de drift doble.
+- **Fix propuesto**: única fuente de verdad: la ruta importa de `template/` y elige rama según tenga o no relaciones la entity; corregir typos.
+- **Estado**: ⬜ pendiente
+
+### F6-C3 — 🔴 Regex de atributos frágil + fallback que fabrica atributos + sin validar que la entity exista
+- **Problema**: `/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/g` falla con decorador y propiedad en la misma línea, paréntesis anidados (`default: now()`, strings con `)`) o `@Column(...)` de una línea. Si matchea PARCIAL, la lista queda desalineada y el constructor recibe argumentos en posiciones equivocadas (**corrupción silenciosa**, sin error de compilación si los tipos coinciden). Si no matchea NADA: fallback `["nombre","descripcion"]` — atributos que quizá no existen ni en entity ni en DTO. Y si el fichero de entity NO existe, no hay error: genera un mapper con import roto.
+- **Fix propuesto**: parseo robusto (parser TS o regex multilinea con balance); error 422 si la entity no existe o no se detecta ningún atributo; jamás fabricar atributos.
+- **Estado**: ⬜ pendiente
+
+### F6-M1 — 🟡 `const dtoToString` muerto y `async` innecesario en el mapper simple
+- **Problema**: el template declara `const dtoToString: string = X.toString();` y luego pasa `X.toString()` OTRA vez al ReadDto (variable muerta + doble llamada; no rompe build porque la api no activa `noUnusedLocals`). Los 3 métodos van `async` sin `await`; el modelo es síncrono salvo que haya relaciones.
+- **Fix propuesto**: usar `dtoToString` como primer argumento (o eliminarlo); `async`/`Promise` solo en la rama relacional.
+- **Estado**: ⬜ pendiente
+
+### F6-m1 — 🟢 Formato: `export {XMapper}` sin espacios en index vs api `export { XMapper }`; código generado sin pasar por prettier de la api
+- **Estado**: ⬜ pendiente
+
+### ✅ Cumple
+Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../shared/dto`) · firma de `entityToDto` (toString, id, attrs…) correcta · guard 409 · alta en `index.ts` con guard.
+
+---
+
+## Función 7 — Crear repository (`/api/crear-repository`)
+
+**Veredicto: NO CUMPLE (registro/exports rotos). El template base es correcto.**
+
+### F7-C1 — 🔴 El repository queda PROVISTO pero NUNCA EXPORTADO desde PersistenceModule
+- **Problema**: el parche a `persistence.module.ts` agrega la clase a `providers` y DESPUÉS chequea `if (!moduleContent.includes(repositoryClassName))` para `exports` — la condición ya es falsa tras el insert en providers → `exports` jamás se actualiza.
+- **Consecuencia**: el primer service que inyecte `XRepository` (fuera de PersistenceModule) → `Nest can't resolve dependencies` en bootstrap.
+- **Fix propuesto**: guardas independientes por array, o mejor: no parchear el module (ver F7-C2).
+- **Estado**: ⬜ pendiente
+
+### F7-C2 — 🔴 Parchea `persistence.module.ts` en vez del registro dinámico `persistence.service.ts`
+- **Problema**: la api registra repositories DINÁMICAMENTE: `export const repository = [...]` en `persistence.service.ts`, consumido por `forFeature([...entity])`, `providers: [...repository]` y `exports: [...repository]`. `crear-entidad` ya actualiza el array `entity` de ese registro, pero `crear-repository` NO actualiza el array `repository` y en su lugar mete la clase estáticamente en el module → doble fuente de verdad, fuera del modelo de la api.
+- **Fix propuesto**: agregar la clase a `export const repository = [...]` de `persistence.service.ts` (mismo patrón que `crear-entidad` usa para `entity`); no tocar `persistence.module.ts`.
+- **Estado**: ⬜ pendiente
+
+### F7-C3 — 🔴 Repos relacionales: faltan las inyecciones auxiliares y los helpers de resolución
+- **Problema**: el template solo inyecta su propio `Repository<XEntity>`. El modelo (`menu-traduccion.repository.ts`) inyecta además `Repository<MenuEntity>`/`Repository<IdiomaEntity>` y expone `findMenuById`/`findIdiomaById` (filtro `activo: true`) que el mapper usa para validar y 404 con i18n.
+- **Fix propuesto**: si la entity tiene relaciones M:1/1:1, inyectar los repos relacionados y generar los helpers `find<Relacion>ById` (las entities ya están en `forFeature` vía registro dinámico).
+- **Estado**: ⬜ pendiente
+
+### F7-M1 — 🟡 `extraerNombresRelaciones` puede perder relaciones → `super()` sin joins → nulls silenciosos
+- **Problema**: si el decorador y la propiedad están en la misma línea, o si entre ambos hay otra anotación/comentario, la relación se pierde del array `['menu','idioma']` → `findAll` sin `leftJoinAndSelect` → ReadDto con relaciones null sin error.
+- **Fix propuesto**: parser TS para extraer relaciones; probar contra las entities reales multi-línea de la api.
+- **Estado**: ⬜ pendiente
+
+### F7-m1 — 🟢 `import {Repository }` con espacio extra; index sin espacios `{XRepository}` vs `{ XRepository }`; `super(repo, [])` con array vacío en vez de omitir el 2º argumento (aceptable, `relations?` opcional)
+- **Estado**: ⬜ pendiente
+
+### ✅ Cumple
+Estructura del template correcta (`extends GenericRepository<X> implements IRepository<X>`, `@InjectRepository`, `super(repo, [relations])` con nombres de propiedad reales) · guard 409 · alta en `index.ts` · kebab-case.
+
+---
+
+## Función 8 — Crear service (`/api/crear-service`)
+
+**Veredicto: NO CUMPLE por registro. El template es correcto (el más fiel de los 10).**
+
+### F8-C1 — 🔴 El regex del parche no matchea `core.service.ts` real → el service NUNCA se registra
+- **Problema**: `providers:\s*\[([^\]]*)\]` busca `providers:` CON DOS PUNTOS; `core.service.ts` declara `export const providers = [...]` (con `=`). El match es null → no se agrega al array. Resultado: se añade el import (queda sin uso) y el service queda huérfano → DI failure al inyectarlo.
+- **Fix propuesto**: parchear el array real: regex `export const providers\s*=\s*\[([^\]]*)\]`, o registrar service+mapper con el mecanismo del F8-C2.
+- **Estado**: ⬜ pendiente
+
+### F8-C2 — 🔴 Nadie registra el MAPPER en `core.service.ts` (brecha transversal con #6)
+- **Problema**: la api registra PARES `(XService, XMapper)` en `export const providers`. `crear-service` solo registra (intenta) el service; `crear-mapper` no toca `core.service.ts` → aunque F8-C1 se arregle, el mapper sigue sin registrar → `Nest can't resolve dependencies of the XService (?)`.
+- **Fix propuesto**: registrar el mapper junto al service (extender esta ruta o `crear-mapper`).
+- **Estado**: ⬜ pendiente
+
+### F8-M1 — 🟡 Parche regex frágil y doble fuente de verdad (mismo patrón que F7-C2)
+- **Problema**: `core.service.ts` es un array estático formateado por prettier; cualquier reformateo rompe el regex. La api consume `providers` desde `core.service.ts` — el generador no debería depender del formato exacto.
+- **Fix propuesto**: un único "registrar slice" con parser TS + anclas idempotentes que actualice los 3 registros (`persistence.service.ts`, `core.service.ts`, `api.service.ts`).
+- **Estado**: ⬜ pendiente
+
+### ✅ Cumple
+Template fiel al modelo (`extends GenericService<X>`, `super(configService, repo, mapper, logHistoryService, traza)`) · imports correctos · `traza` default true · guard 409 · alta en `index.ts`.
+
+---
+
+## Función 9 — Crear controller (`/api/crear-controller`)
+
+**Veredicto: NO CUMPLE — el fichero generado no compila y el registro es incorrecto.**
+
+### F9-C1 — 🔴 Placeholder `$import` jamás sustituido → `Cannot find name '$import'`
+- **Problema**: el template incluye una línea `$import` (línea ~22/17) que la ruta NUNCA reemplaza (no hay `replace(/\$import/g, ...)`) → el fichero generado contiene la expresión `$import` → TS2304.
+- **Fix propuesto**: eliminar la línea del template o sustituirla por cadena vacía.
+- **Estado**: ⬜ pendiente
+
+### F9-C2 — 🔴 Identificador en minúscula: `import {idiomaController}` vs clase exportada `IdiomaController`
+- **Problema**: el parche a `api.module.ts` usa `import {${nombreLower}Controller}` y agrega `${nombreLower}Controller` al array `controllers`, pero la clase generada es `IdiomaController` (ver `controllerClassName`) → "Module has no exported member 'idiomaController'" + referencia indefinida. `crear-service` no tiene este bug (usa `serviceClassName`).
+- **Fix propuesto**: usar `controllerClassName`.
+- **Estado**: ⬜ pendiente
+
+### F9-C3 — 🔴 Parchea `api.module.ts` estático en vez del registro dinámico `api.service.ts`
+- **Problema**: la api declara `controllers: [...controller]` consumiendo `export const controller = [...]` de `api.service.ts`. Aun arreglando F9-C2, meter la clase directo en el module duplica la fuente de verdad (mismo anti-patrón que F7-C2/F8-C1).
+- **Fix propuesto**: actualizar `export const controller = [...]` de `api.service.ts`.
+- **Estado**: ⬜ pendiente
+
+### F9-M1 — 🟡 `header == key` en ListadoDto: encabezados con claves crudas
+- **Problema**: el modelo separa `header = ['id','Codigo','Nombre','Defecto']` (labels) de `key = ['id','codigo','nombre','defecto']` (claves); el generador pone los nombres de atributo crudos en AMBOS → los listados muestran camelCase como encabezados.
+- **Fix propuesto**: derivar labels (capitalizar o pedir "label" por atributo en el form) y separar header de key.
+- **Estado**: ⬜ pendiente
+
+### F9-M2 — 🟡 Endpoints sin seed de Funcion/endPoint → 403 para todos los usuarios
+- **Problema**: `PermissionGuard` exige que `controller.servicio` (metadata de `@Servicio`) exista entre las funciones de los roles (BD). La api siembra funciones ('Gestión de idiomas' + endPoints); el generador no crea ese seed → el CRUD recién generado es inaccesible hasta siembra manual.
+- **Fix propuesto**: generar seed opcional (Funcion + endPoints + asignación al rol admin) o documentar el paso.
+- **Estado**: ⬜ pendiente
+
+### F9-m1 — 🟢 Tag pluralizado con `+ 's'` ingenua; indentación del template no pasa prettier; import de la entity solo usado como type-param (aceptable)
+- **Estado**: ⬜ pendiente
+
+### ✅ Cumple
+Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `POST /`, `POST /multiple`, `POST /importar/elementos`, `PATCH /:id`, `PATCH /elementos/multiples`, `POST /filtrar`, `POST /buscar`) · `@Servicio('idioma','findAll')` correcto · `super(service, paginationService, ruta)` correcto · `updateMultiple → Promise<ResponseDto>` correcto (coincide con generic.controller) · guards + Swagger + i18n-style responses correctos · guard 409.
+
+---
+
+## Función 10 — CRUD completo (`/api/crear-crud-completo`)
+
+**Veredicto: NO CUMPLE como orquestador: encadena 5 generadores rotos y reporta éxito sin verificar.**
+
+### F10-C1 — 🔴 Reporta `success: true` (200) aunque la api quede sin compilar
+- **Problema**: cada sub-ruta solo valida la ESCRITURA de ficheros; no hay verificación posterior (parseo TS, `tsc --noEmit`). Con F5/F6/F7/F8/F9 activos, un flujo "exitoso" entrega una api que no compila ni arranca, y el usuario ve "CRUD completo creado exitosamente".
+- **Fix propuesto**: tras generar, validar (parsear los ficheros tocados como mínimo; ideal `tsc --noEmit`) y reportar el estado REAL; fallar si algo no parsea.
+- **Estado**: ⬜ pendiente
+
+### F10-C2 — 🔴 Hereda TODOS los defectos de las funciones 4–9 (no tiene solución propia)
+- **Problema**: el valor del botón es ensamblar la cadena entity→controller; hoy la cadena NO se ensambla: repo provisto pero no exportado (F7-C1), service sin registrar (F8-C1), mapper sin registrar (F8-C2), controller con `$import` y registro roto (F9-C1/C2/C3).
+- **Fix propuesto**: dependencia dura de los fixes 4–9 + test E2E "la api generada compila".
+- **Estado**: ⬜ pendiente
+
+### F10-M1 — 🟡 Sin atomicidad ni cleanup; `someSuccess` devuelve `success: true` con mensaje ambiguo
+- **Problema**: si un paso falla (409/500), los ficheros previos quedan; la respuesta 200 "parcial" se presta a confusión.
+- **Fix propuesto**: modo all-or-nothing (rollback de lo creado) o reporte estructurado claro con acción por paso.
+- **Estado**: ⬜ pendiente
+
+### F10-M2 — 🟡 No genera seed de funciones/endPoints (ver F9-M2) → "CRUD completo" termina en 403
+- **Estado**: ⬜ pendiente
+
+### F10-m1 — 🟢 Self-fetch HTTP secuencial (5 round-trips); serían llamadas directas a funciones; bajo riesgo
+- **Estado**: ⬜ pendiente
+
+### ✅ Cumple
+Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traza` al service · estructura `results` por paso (buena base para el reporte real).
+
+---
+
+## Patrones transversales confirmados (2ª tanda, funciones 6–10)
+
+1. **La api se registra dinámicamente; el generador parchea estáticamente (o no parchea)**: `persistence.service.ts` (`export const entity/repository`), `core.service.ts` (`export const providers`) y `api.service.ts` (`export const controller`) SON el mecanismo de registro. El generador: actualiza solo `entity`; parchea el module con regex que no matchea el formato real o con bugs de secuencia (F7-C1, F8-C1, F9-C3).
+2. **Cadena DI nunca completa**: para una slice nueva hacen falta 5 registros; el generador no completa ninguno de los 3 de core/api → ningún CRUD generado llega a arrancar, aunque sus ficheros individuales compilaran.
+3. **Éxito reportado = fichero escrito**, nunca "compila"/"arranca" (F10-C1).
+4. **Placeholders sin sustituir y stubs** reaparecen (F9-C1 `$import`; ya visto en F2-C3).
+
+## Estado global de la auditoría
+
+| # | Función | Veredicto |
+|---|---|---|
+| 1 | Nueva entity | ❌ NO CUMPLE |
+| 2 | Editar entity | ❌ NO CUMPLE (la más destructiva) |
+| 3 | Crear nomenclador | ❌ NO CUMPLE (nomenclador inerte) |
+| 4 | Nuevo DTO | ❌ NO CUMPLE (evidencia E2E 🧪) |
+| 5 | DTOs CRUD | ❌ NO CUMPLE (evidencia E2E 🧪) |
+| 6 | Crear mapper | ❌ NO CUMPLE (con relaciones) |
+| 7 | Crear repository | ❌ NO CUMPLE (exports/registro) |
+| 8 | Crear service | ❌ NO CUMPLE (registro) |
+| 9 | Crear controller | ❌ NO CUMPLE (no compila) |
+| 10 | CRUD completo | ❌ NO CUMPLE (orquesta los 9 anteriores) |
+
+**10/10 funciones NO CUMPLEN.** Prioridad de fix sugerida: F9-C1/C2 y F8-C1 (baratos y bloquean todo) → F7-C1/C2 → F6-C1/C3 → F5-C1/C2 y F4-C1 → F1-C1..C5 → F2 (replantear como edición quirúrgica) → F3 (repository concreto nomenclador) → F10 (verificación post-generación).
 
 ## Decisiones pendientes del propietario
 

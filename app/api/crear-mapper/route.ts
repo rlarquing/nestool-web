@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { formatearNombre, eliminarSufijo, aInicialMinuscula, ordenRequeridoPrimero } from '@/utilities/entity-utils';
+import { ordenSegunConstructor } from '@/utilities/entidad-sync';
 import { cargarEntity, EntityInfo, RelacionEntity } from '@/utilities/entity-parser';
 import { mapperSimpleTemplate, mapperRelacionalTemplate } from '@/template/mapper.template';
 
@@ -154,12 +155,15 @@ export async function POST(req: NextRequest) {
             }
 
             // Parámetros del constructor de la entity: relaciones unitarias + columnas.
-            // MISMO orden compartido que crear-entidad (requeridos primero, luego
-            // opcionales, respetando el orden de declaración dentro de cada grupo).
+            // Fuente de verdad del orden posicional: el CONSTRUCTOR REAL de la entity
+            // (F2: tras una edición el orden de declaración puede no coincidir con el
+            // constructor). Fallback: el orden canónico requeridos-primero.
             const atributosConstructor = info.atributos.filter(
                 (a) => a.tipo === 'columna' || (a.tipo === 'relacion' && (a.tipoRelacion === 'ManyToOne' || a.tipoRelacion === 'OneToOne'))
             );
-            const constructorOrdenado = ordenRequeridoPrimero(atributosConstructor, (a) => !a.opcional);
+            const contenidoEntity = readFileSync(entityPath, 'utf-8');
+            const constructorOrdenado = ordenSegunConstructor(contenidoEntity, atributosConstructor)
+                ?? ordenRequeridoPrimero(atributosConstructor, (a) => !a.opcional);
             const parametrosNew = constructorOrdenado.map((a) =>
                 a.tipo === 'columna' ? `create${nombre}Dto.${a.nombre}` : a.nombre
             );
@@ -182,8 +186,10 @@ export async function POST(req: NextRequest) {
                 .replace(/\$name/g, nombre);
         } else {
             // ---- Rama simple (F6-M1: síncrona, dtoToString usado) ----
-            // Mismo orden compartido requeridos-primero que el constructor de la entity
-            const columnasOrdenadas = ordenRequeridoPrimero(info.columnas, (c) => !c.opcional);
+            // Orden posicional desde el constructor real de la entity (F2); fallback canónico.
+            const contenidoEntitySimple = readFileSync(entityPath, 'utf-8');
+            const columnasOrdenadas = ordenSegunConstructor(contenidoEntitySimple, info.columnas)
+                ?? ordenRequeridoPrimero(info.columnas, (c) => !c.opcional);
             parametrosDtoToEntity = columnasOrdenadas.map((c) => `create${nombre}Dto.${c.nombre}`).join(', ');
             const analisisDtoToUpdateEntity = info.columnas.map((c) =>
                 c.opcional

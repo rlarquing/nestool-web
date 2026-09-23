@@ -1,232 +1,159 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
+import { formatearNombre, eliminarSufijo, aInicialMinuscula, pluralizarEntidad } from '@/utilities/entity-utils';
+import { sincronizarAtributosEntity, type AtributoEntrada, type DetalleCambio } from '@/utilities/entidad-sync';
+import { inyectarRelacionInversa, eliminarRelacionInversa } from '@/utilities/relacion-inversa';
+
+interface CuerpoPeticion {
+    basePath: string;
+    entityName: string;
+    atributos: AtributoEntrada[];
+    esquema?: string;
+    databaseType?: string;
+}
+
+/** Extrae el miembro `SchemaEnum.X` del decorador @Entity actual (sin tocarlo: F2-C4/C5). */
+function esquemaActual(content: string): string | null {
+    const match = content.match(/schema:\s*SchemaEnum\.([A-Za-z0-9_]+)/);
+    return match ? match[1] : null;
+}
 
 export async function POST(req: NextRequest) {
     try {
-        const { basePath, entityName, atributos, esquema } = await req.json();
+        const { basePath, entityName, atributos, esquema, databaseType } = await req.json() as CuerpoPeticion;
 
-        if (!basePath || !entityName || !atributos) {
+        if (!basePath || !entityName || !Array.isArray(atributos)) {
             return NextResponse.json(
                 { error: 'basePath, entityName y atributos son requeridos' },
                 { status: 400 }
             );
         }
 
-        // Construir la ruta del archivo de entidad
-        const fileName = entityName.endsWith('Entity') 
-            ? entityName.replace('Entity', '') 
-            : entityName;
-        
-        const entityPath = path.join(
-            basePath, 
-            'src/persistence/entity', 
-            `${fileName.toLowerCase()}.entity.ts`
-        );
+        // La clase exportada SIEMPRE termina en Entity (así la crea crear-entidad)
+        const className = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
+        const nombreBase = eliminarSufijo(className, 'Entity');
+
+        // F2-C7: ruta kebab real (antes fileName.toLowerCase() → 404 para multi-palabra)
+        const kebab = formatearNombre(nombreBase, '-');
+        const entityPath = path.join(basePath, 'src/persistence/entity', `${kebab}.entity.ts`);
 
         if (!existsSync(entityPath)) {
             return NextResponse.json(
-                { error: `No se encontró el archivo de entidad: ${fileName}.entity.ts` },
+                { error: `No se encontró el archivo de entidad: ${kebab}.entity.ts` },
                 { status: 404 }
             );
         }
 
-        // Leer el contenido actual
+        // Nombres duplicados en la petición → rechazar antes de tocar nada
+        const vistos = new Set<string>();
+        for (const attr of atributos) {
+            if (!attr?.nombreAtributo || !attr?.tipoDato) {
+                return NextResponse.json(
+                    { error: 'Todos los atributos deben tener nombre y tipo de dato' },
+                    { status: 400 }
+                );
+            }
+            if (vistos.has(attr.nombreAtributo)) {
+                return NextResponse.json(
+                    { error: `Atributo duplicado en la petición: ${attr.nombreAtributo}` },
+                    { status: 400 }
+                );
+            }
+            vistos.add(attr.nombreAtributo);
+        }
+
         const currentContent = readFileSync(entityPath, 'utf-8');
-        
-        // Generar nuevo contenido con los atributos actualizados
-        const newContent = generateUpdatedEntityContent(currentContent, entityName, atributos, esquema);
 
-        // Escribir el archivo actualizado
-        writeFileSync(entityPath, newContent, 'utf-8');
+        // F2-C4/C5: el decorador @Entity (tabla, schema, índices), la herencia y
+        // todo el código propio NO se regeneran jamás. Si piden otro esquema, se avisa.
+        const avisos: string[] = [];
+        const esquemaEnFichero = esquemaActual(currentContent);
+        if (esquema && esquemaEnFichero && esquema.toString().toUpperCase() !== esquemaEnFichero) {
+            avisos.push(`El esquema de una entity existente no se modifica por seguridad (edición quirúrgica): sigue siendo SchemaEnum.${esquemaEnFichero}. Cámbialo a mano si de verdad necesitas migrarla de schema.`);
+        }
+        const esquemaParaDestinos = (esquemaEnFichero ?? (esquema ? esquema.toString().toUpperCase() : 'PUBLIC'));
 
-        return NextResponse.json({ 
+        // Diff quirúrgico: añade lo nuevo, elimina lo ausente, no re-emite lo existente
+        let resultado;
+        try {
+            resultado = sincronizarAtributosEntity({
+                contenido: currentContent,
+                className,
+                deseados: atributos,
+                databaseType,
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            // Fichero no parseable / clase inesperada: NUNCA se toca
+            return NextResponse.json({ error: message }, { status: 422 });
+        }
+        avisos.push(...resultado.avisos);
+
+        // Relaciones añadidas → inyectar la inversa en la entity destino (mismo
+        // mecanismo con anclas idempotentes que crear-entidad)
+        for (const agr of resultado.agregados) {
+            if (agr.tipoDato !== 'relation' || !agr.rEntity) continue;
+            const tipoRelacion = agr.tipoRelacion ?? 'ManyToOne';
+            const coleccionInversa = tipoRelacion === 'OneToOne'
+                ? aInicialMinuscula(nombreBase)
+                : pluralizarEntidad(className);
+            const inyeccion = inyectarRelacionInversa(basePath, {
+                tipoRelacion,
+                nombreAtributo: agr.nombreAtributo,
+                entidadOrigen: className,
+                entidadDestino: agr.rEntity,
+                coleccionInversa,
+                nombreInversa: aInicialMinuscula(nombreBase),
+                requerido: agr.nulo !== true,
+            }, { esquema: esquemaParaDestinos });
+            avisos.push(...inyeccion.avisos);
+        }
+
+        // Relaciones eliminadas → retirar la inversa anclada en la entity destino
+        for (const eli of resultado.eliminados) {
+            if (eli.tipoDato !== 'relation') continue;
+            const limpieza = eliminarRelacionInversa(basePath, className, eli.nombreAtributo);
+            avisos.push(...limpieza.avisos);
+            if (!limpieza.eliminado) {
+                avisos.push(`Si ${eli.rEntity} tenía una inversa escrita a mano hacia "${eli.nombreAtributo}", quítala a mano (nestool no toca bloques sin su ancla).`);
+            }
+        }
+
+        // Guardar solo si cambió (idempotencia real)
+        let escrito = false;
+        if (resultado.cambio && resultado.contenido !== currentContent) {
+            const { writeFileSync } = await import('fs');
+            writeFileSync(entityPath, resultado.contenido, 'utf-8');
+            escrito = true;
+        }
+
+        const partes: string[] = [];
+        if (resultado.agregados.length) partes.push(`+${resultado.agregados.length} añadido(s)`);
+        if (resultado.eliminados.length) partes.push(`-${resultado.eliminados.length} eliminado(s)`);
+        partes.push(`${resultado.sinCambios.length} sin cambios`);
+        if (!escrito) partes.push('fichero intacto');
+
+        return NextResponse.json({
             success: true,
-            message: `Entidad ${entityName} actualizada correctamente`,
-            entityName,
-            atributosCount: atributos.length
+            message: escrito
+                ? `Entity ${className} editada quirúrgicamente: ${partes.join(', ')}`
+                : `Entity ${className} sin cambios que aplicar (${partes.join(', ')})`,
+            entityName: className,
+            filePath: entityPath,
+            escrito,
+            agregados: resultado.agregados,
+            eliminados: resultado.eliminados,
+            sinCambios: resultado.sinCambios,
+            avisos,
+            atributosCount: atributos.length,
         });
 
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return NextResponse.json({ error: message }, { status: 500 });
+        return NextResponse.json({ error: `Error al actualizar la entidad: ${message}` }, { status: 500 });
     }
 }
 
-function generateUpdatedEntityContent(currentContent: string, entityName: string, atributos: any[], esquema?: string): string {
-    // Extraer imports existentes
-    const imports = extractImports(currentContent);
-    
-    // Generar imports necesarios para los nuevos atributos
-    const newImports = generateImportsForAttributes(atributos);
-    const allImports = [...new Set([...imports, ...newImports])];
-    
-    // Generar código de atributos
-    const atributosCode = generateAttributesCode(atributos);
-    
-    // Generar parámetros del constructor
-    const parametrosConstructor = generateConstructorParameters(atributos);
-    
-    // Generar asignaciones del constructor
-    const thisAtributos = generateConstructorAssignments(atributos);
-    
-    // Obtener el nombre de la clase
-    const className = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
-    
-    // Construir el nuevo contenido
-    const importSection = allImports.length > 0 ? allImports.join('\n') + '\n\n' : '';
-    
-    // Extraer el decorador @Entity existente y actualizarlo si es necesario
-    const entityDecorator = generateEntityDecorator(entityName, esquema);
-    
-    const newContent = `${importSection}${entityDecorator}
-export class ${className} extends GenericEntity {
-
-    ${atributosCode}
-
-    constructor(${parametrosConstructor}) {
-        super();
-        ${thisAtributos}
-    }
-
-   public toString(): string {
-        return '';
-    }
-}`;
-
-    return newContent;
-}
-
-function extractImports(content: string): string[] {
-    const imports: string[] = [];
-    const lines = content.split('\n');
-    
-    for (const line of lines) {
-        if (line.trim().startsWith('import ')) {
-            imports.push(line.trim());
-        }
-    }
-    
-    return imports;
-}
-
-function generateImportsForAttributes(atributos: any[]): string[] {
-    const imports: string[] = [];
-    const typeormImports = new Set<string>();
-    
-    // Importaciones básicas de TypeORM
-    typeormImports.add('Column');
-    typeormImports.add('Entity');
-    
-    for (const attr of atributos) {
-        if (attr.tipoDato === 'relation') {
-            // Agregar importaciones de relaciones
-            if (attr.tipoRelacion === 'OneToOne') {
-                typeormImports.add('OneToOne');
-                typeormImports.add('JoinColumn');
-            } else if (attr.tipoRelacion === 'OneToMany') {
-                typeormImports.add('OneToMany');
-            } else if (attr.tipoRelacion === 'ManyToOne') {
-                typeormImports.add('ManyToOne');
-                typeormImports.add('JoinColumn');
-            } else if (attr.tipoRelacion === 'ManyToMany') {
-                typeormImports.add('ManyToMany');
-                typeormImports.add('JoinTable');
-            }
-            
-            // Agregar importación de la entidad relacionada
-            if (attr.rEntity) {
-                imports.push(`import { ${attr.rEntity} } from './${attr.rEntity.toLowerCase().replace('entity', '')}.entity';`);
-            }
-        }
-    }
-    
-    // Agregar importación de TypeORM
-    if (typeormImports.size > 0) {
-        imports.unshift(`import { ${Array.from(typeormImports).join(', ')} } from "typeorm";`);
-    }
-    
-    // Agregar importaciones básicas
-    imports.unshift(`import { GenericEntity } from "./generic.entity";`);
-    imports.unshift(`import { SchemaEnum } from '../../database/schema/schema.enum';`);
-    
-    return imports;
-}
-
-function generateAttributesCode(atributos: any[]): string {
-    return atributos.map(attr => {
-        let code = '';
-        
-        if (attr.tipoDato === 'relation') {
-            // Generar decoradores de relación
-            if (attr.tipoRelacion === 'OneToOne') {
-                code += `    @OneToOne(() => ${attr.rEntity}, { nullable: ${attr.nulo} })\n`;
-                code += `    @JoinColumn()\n`;
-            } else if (attr.tipoRelacion === 'OneToMany') {
-                code += `    @OneToMany(() => ${attr.rEntity}, ${attr.nombreAtributo} => ${attr.nombreAtributo}.${getInverseProperty(attr)})\n`;
-            } else if (attr.tipoRelacion === 'ManyToOne') {
-                code += `    @ManyToOne(() => ${attr.rEntity}, { nullable: ${attr.nulo} })\n`;
-                code += `    @JoinColumn()\n`;
-            } else if (attr.tipoRelacion === 'ManyToMany') {
-                code += `    @ManyToMany(() => ${attr.rEntity})\n`;
-                code += `    @JoinTable()\n`;
-            }
-        } else {
-            // Generar decorador @Column
-            const columnOptions = [];
-            if (attr.length) columnOptions.push(`length: ${attr.length}`);
-            if (attr.nulo) columnOptions.push('nullable: true');
-            if (attr.unico) columnOptions.push('unique: true');
-            if (attr.tipoDato === 'number' && attr.integer) columnOptions.push('type: "int"');
-            
-            const optionsStr = columnOptions.length > 0 ? `{ ${columnOptions.join(', ')} }` : '';
-            code += `    @Column(${optionsStr})\n`;
-        }
-        
-        // Agregar la declaración de la propiedad
-        code += `    ${attr.nombreAtributo}: ${getTypeScriptType(attr.tipoDato, attr.rEntity)};`;
-        
-        return code;
-    }).join('\n\n    ');
-}
-
-function generateConstructorParameters(atributos: any[]): string {
-    return atributos.map(attr => {
-        const type = getTypeScriptType(attr.tipoDato, attr.rEntity);
-        return `${attr.nombreAtributo}: ${type}`;
-    }).join(', ');
-}
-
-function generateConstructorAssignments(atributos: any[]): string {
-    return atributos.map(attr => `this.${attr.nombreAtributo} = ${attr.nombreAtributo};`).join('\n        ');
-}
-
-function generateEntityDecorator(entityName: string, esquema?: string): string {
-    const tableName = entityName.toLowerCase().replace('entity', '');
-    
-    if (esquema) {
-        return `@Entity('${tableName}', { schema: SchemaEnum.${esquema} })`;
-    } else {
-        return `@Entity('${tableName}')`;
-    }
-}
-
-function getTypeScriptType(tipoDato: string, rEntity?: string): string {
-    const typeMap: { [key: string]: string } = {
-        'string': 'string',
-        'number': 'number',
-        'boolean': 'boolean',
-        'Date': 'Date',
-        'Timestamp': 'Date',
-        'Geometry': 'any',
-        'relation': rEntity || 'any'
-    };
-    
-    return typeMap[tipoDato] || 'string';
-}
-
-function getInverseProperty(attr: any): string {
-    // Esta función debería determinar la propiedad inversa basada en la relación
-    // Por simplicidad, retornamos un valor por defecto
-    return 'id';
-}
+/** Tipo expuesto para el hook del frontend. */
+export type ActualizarEntidadDetalle = DetalleCambio;

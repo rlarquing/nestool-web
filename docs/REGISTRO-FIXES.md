@@ -96,41 +96,49 @@
 ### F2-C1 — 🔴 Reescritura destructiva: pierde @Index, orderBy, métodos propios, inversas y toString real
 - **Problema**: `generateUpdatedEntityContent()` reconstruye todo el fichero. Una pasada de "editar" sobre `UserEntity` eliminaría `validatePassword()`; sobre `IdiomaEntity` eliminaría `@Index('UQ_idioma_codigo', ...)`.
 - **Fix propuesto**: edición quirúrgica con el parser de TS (reemplazar solo el bloque de atributos + constructor), conservando el resto literal.
-- ✅ **Estado**: CORREGIDO (fase 3, parcial). `@Entity(..., { schema, orderBy: { id: 'ASC' } })` siempre; índice compuesto de clase `UQ_<tabla>_<cols>` solo cuando hay 2+ únicos (un único se deja en la columna, como user.entity).
+- ✅ **Estado**: CORREGIDO (fase 3 parcial; fase 4 completa). Fase 3: `@Entity(..., { schema, orderBy: { id: 'ASC' } })` siempre; índice compuesto de clase `UQ_<tabla>_<cols>` solo cuando hay 2+ únicos. Fase 4: editar-entity ya NO reescribe nada — diff por nombre sobre el fichero real; los atributos existentes quedan byte a byte (métodos propios, @Index, herencia e inversas intactos por construcción).
 
 ### F2-C2 — 🔴 Imports duplicados
 - **Problema**: `extractImports()` conserva las líneas existentes y `generateImportsForAttributes()` re-inyecta `Column, Entity` + typeorm **siempre** → `Duplicate identifier 'Column'`.
 - **Fix propuesto**: fusionar identificadores por módulo (parsear imports existentes y unir sets) o regenerarlos todos desde cero a partir de los atributos.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). La reescritura desapareció: los imports existentes no se tocan; los nuevos se fusionan con `fusionarImportsTypeorm` (sin duplicados) y los de entities relacionadas solo se añaden si no están. Tras eliminaciones se PODAN typeorm/entidades que quedaron sin uso.
 
 ### F2-C3 — 🔴 `getInverseProperty()` devuelve `'id'` (stub confeso)
 - **Problema**: todo `@OneToMany` queda `x => x.id`.
 - **Fix propuesto**: resolver la inversa real buscando en la entity relacionada la propiedad cuyo tipo sea la entity actual (mismo criterio que #1); si no se encuentra, omitir el callback.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). El stub se eliminó junto con toda la generación ad-hoc de la ruta: las relaciones nuevas usan `generarRelacion`/`generarRelacionInversa` (los generadores corregidos de fase 3) con `coleccionInversa` calculada y ancla idempotente en el destino.
 
 ### F2-C4 — 🔴 Renombra la tabla (snake_case perdido)
 - **Problema**: `entityName.toLowerCase().replace('entity','')` → `menutraduccion` en vez de `menu_traduccion` → TypeORM la interpreta como otra tabla (drift/datos "desaparecidos").
 - **Fix propuesto**: usar `formatearNombre(eliminarSufijo(nombre,'Entity'), '_')`.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). El decorador `@Entity` de un fichero existente JAMÁS se regenera (tabla/schema/índices intocados). Si la petición pide otro esquema se responde con un aviso y no se aplica. Ruta del fichero corregida a kebab real (ver F2-C7).
 
 ### F2-C5 — 🔴 Degrada nomencladores
 - **Problema**: `extends GenericEntity` hardcodeado → editar una entity que hereda `GenericNomencladorEntity` la degrada (pierde nombre/descripcion y el mecanismo del generic).
 - **Fix propuesto**: detectar la clase base actual y conservarla; conservar también el prefijo de tabla `nom_` si existe.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). La herencia y los decoradores de clase (`@Entity`, `@Unique`, `@Index`…) no se regeneran nunca. E2E: entity que hereda `GenericNomencladorEntity` con `@Unique(['nombre'])` y schema `MOD_NOMENCLATOR` editada → byte-idéntica salvo el atributo añadido.
 
 ### F2-M1 — 🟡 Columna requerida sale sin `nullable: false`
 - **Problema**: solo emite `nullable: true` cuando `nulo`; las requeridas quedan con default TypeORM (nullable) → todo nullable en BD.
 - **Fix propuesto**: emitir `nullable: ${!attr.nulo}` siempre (como hace `generarColumna` de #1, que es correcto).
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). Los atributos NUEVOS pasan por `generarColumna` con `nulo` normalizado a booleano → `nullable: false/true` siempre explícito. Los existentes no se re-emitieren (quedan como estaban).
 
 ### F2-M2 — 🟡 Constructor con colecciones OneToMany como params requeridos; props sin `!`
 - **Problema**: compila (el constructor asigna), pero semánticamente las colecciones no se pasan en constructor (modelo: solo escalares + relaciones dueñas).
-- **Estado**: ⬜ pendiente (se resuelve junto a F1-M5 y F2-C1)
+- ✅ **Estado**: CORREGIDO (fase 4). Cirugía de constructor real: los añadidos escalares y relaciones unitarias (M:1/1:1) reciben param + asignación; los requeridos se insertan ANTES del primer opcional (TS1016); las colecciones nunca. Al eliminar, param y asignación se retiran (params por TEXTO, soporta una-línea y multi-línea). Si la entity no tiene constructor utilizable, se avisa y la propiedad sigue compilando (`!`/`?`).
 
 ### F2-M3 — 🟡 Import de relación con ruta rota para multi-palabra
 - **Problema**: `attr.rEntity.toLowerCase().replace('entity','')` → `menutraduccion` en vez de `menu-traduccion` (kebab).
 - **Fix propuesto**: `formatearNombre(eliminarSufijo(rEntity,'Entity'), '-')`.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 4). Los imports de entities relacionadas usan kebab real; si el identificador ya estaba importado no se duplica.
+
+### F2-C6 — 🔴→✅ (nuevo, fase 4) El flujo de edición no ve las propiedades `!` y al guardar las ELIMINARÍA
+- **Problema**: el parser legacy de `obtener-atributos-entidad` (`/(\w+)\s*:/`) no matchea `titulo!: string` (el `!` rompe el anclaje) → la UI mostraba SOLO las propiedades nulables; guardar la entity habría invocado la eliminación quirúrgica de TODAS las requeridas.
+- **Fix**: `obtener-atributos-entidad` reescrito sobre el parser robusto compartido (`parseEntityContent`); el round-trip es fiel en NOMBRES (y opciones capturables). E2E: MenuTraduccionEntity (2 relaciones unitarias + label, todas con `!`) carga las 3 y el round-trip es byte-idéntico.
+
+### F2-C7 — 🔴→✅ (nuevo, fase 4) Ruta del fichero en minúsculas → 404 para entities multi-palabra
+- **Problema**: `fileName.toLowerCase()` → `menutraduccion.entity.ts` no existe (el fichero real es `menu-traduccion.entity.ts`) → editar/descargar una entity multi-palabra fallaba con 404.
+- **Fix**: `formatearNombre(eliminarSufijo(className,'Entity'), '-')` en `obtener-atributos-entidad` y `actualizar-entidad`.
 
 ---
 
@@ -249,6 +257,10 @@ Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según 
 
 ### F6-m1 — 🟢 Formato: `export {XMapper}` sin espacios en index vs api `export { XMapper }`; código generado sin pasar por prettier de la api
 - ✅ **Estado**: CORREGIDO (fase 1 el formato de index `{ XMapper }`; fase 3 el resto). Los templates generan con indentación/quotes consistentes con la api; pasar por el prettier de la api sigue siendo paso manual del usuario.
+
+### F6-C4 — 🔴→✅ (nuevo, fase 4) El `new XEntity(...)` usa el orden de DECLARACIÓN, no el del CONSTRUCTOR real
+- **Problema**: el mapper calculaba el orden posicional con `ordenRequeridoPrimero(atributos)` sobre el orden de DECLARACIÓN. Tras una edición (F2) la relación nueva entra arriba del fichero pero el constructor conserva su orden histórico → `new ProductoEntity(categoria, codigo, ...)` vs `constructor(codigo, nombre, precio, categoria)` → asignaciones cruzadas silenciosas (categoria→codigo).
+- **Fix**: `ordenSegunConstructor()` (utilities/entidad-sync.ts) — el mapper deriva el orden del CONSTRUCTOR REAL de la entity (única fuente de verdad posicional); fallback canónico requeridos-primero si no hay constructor utilizable. E2E: mapper regenerado tras editar → `new ProductoEntity(dto.codigo, dto.nombre, dto.precio, categoria, dto.descripcion)` coincidiendo posición a posición con el constructor.
 
 ### ✅ Cumple
 Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../shared/dto`) · firma de `entityToDto` (toString, id, attrs…) correcta · guard 409 · alta en `index.ts` con guard.
@@ -465,3 +477,26 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 - **Código generado destacado** (paridad con api-base): `TareaMapper` con `findPrioridadById` + `NotFoundException(traducir('tarea.PRIORIDAD_NOT_FOUND', ...))`; `TareaRepository` con `@InjectRepository(PrioridadEntity)` + helper `activo: true`; `ReadTareaDto` con `prioridad?: number` y `etiquetas?: number[]`.
 - **Hallazgos de la fase (corregidos en el mismo lote)**: bucle infinito del parser con decoradores indentados (`^\s*@` + garantía de progreso); placeholder `$attrNameRepository` sin sustituir; TS1016 (requerido tras opcional) resuelto con el orden compartido.
 - **Pendiente siguiente**: F2 (editar entity = edición quirúrgica, hoy destructiva), F3 (repository concreto de nomenclador), F10 (validación post-generación), decisiones F5-M2/F3-m1.
+
+---
+
+### Lote 4 (editar-entity quirúrgico) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F2-C1 (completa), F2-C2, F2-C3, F2-C4, F2-C5, F2-M1, F2-M2, F2-M3 + **F2-C6** y **F2-C7** (nuevos, ver sus secciones) + **F6-C4** (nuevo: orden posicional del mapper desde el constructor real).
+- **Nueva infraestructura**:
+  - `utilities/entidad-sync.ts` — motor de diff quirúrgico: diff por NOMBRE entre la lista deseada (UI) y los atributos reales; los existentes JAMÁS se re-emiten (el round-trip de la UI es lossy); adiciones con los generadores de fase 3 + cirugía de constructor (params por texto, una-línea y multi-línea; requeridos antes del primer opcional, TS1016; indentación heredada); eliminaciones por bloque (decoradores + propiedad, con límites anti-bucle y detección de decoradores de CLASE `@Entity/@Index/@Unique` — sin esto la eliminación se tragaba `export class`); verificación de referencias (`this.x` fuera del bloque) antes de eliminar; poda de imports typeorm/entidades sin uso.
+  - `utilities/relacion-inversa.ts` — inyección/eliminación de inversas extraída de crear-entidad y compartida con actualizar-entidad; eliminación por ANCLA (`// [nestool] inversa de X.y`) con poda del import de la entity origen si queda sin uso.
+  - `app/api/actualizar-entidad/route.ts` reescrito: 422 si el fichero no parsea (NUNCA se toca), 400 por duplicados, aviso si piden cambiar el schema (no se aplica), respuesta honesta (`agregados/eliminados/sinCambios/avisos/escrito`) en lugar de success ciego; escribe solo si el contenido cambió (idempotencia real).
+  - `obtener-atributos-entidad` sobre el parser robusto compartido (F2-C6) + ruta kebab (F2-C7).
+- **Verificación E2E** (copia limpia de api-base + `bun install`; baseline `tsc --noEmit` = 24 errores preexistentes solo en `test/`):
+  1. **A/B**: crear `ProductoEntity` (3 columnas `!`) + carga → el editor ve las 3 (el parser legacy habría omitido todas las `!`).
+  2. **C**: añadir `descripcion` nullable → bloque insertado, `constructor(..., descripcion?: string)` con asignación, imports fusionados sin duplicar, `@Entity`/`toString` intactos.
+  3. **D**: añadir `categoria` ManyToOne requerida → lado dueño con callback a la inversa real + `@JoinColumn('categoria_id')`, param insertado ANTES del opcional (TS1016 OK), inversa anclada inyectada en `CategoriaEntity`, import kebab.
+  4. **E**: reenviar la misma lista → `escrito: false`, md5 idéntico (idempotencia).
+  5. **F**: `crear-mapper` de la entity editada → `new ProductoEntity(...)` coincide posición a posición con el constructor REAL (F6-C4).
+  6. **G**: eliminar `descripcion` + `categoria` → bloques, params, asignaciones e imports retirados; inversa eliminada de Categoria por ancla; import ProductoEntity podado. **Bug hallado y corregido en la propia verificación**: el localizador arrancaba en `@Entity` y borraba `export class` — añadido corte en `export/class` + skip de decoradores de clase.
+  7. **H**: round-trip de la NATIVA `MenuTraduccionEntity` (relaciones multi-línea, `@Index` compuesto, indentación 2) → **byte-idéntica**.
+  8. **I**: fichero corrupto (clase sin cerrar) → `obtener` y `actualizar` responden 422 y el fichero queda intacto (también con lista vacía que "borraría todo").
+  9. **J/K**: editar la nativa (añadir `nota`/`observacion`) y una entity nomencladora (`extends GenericNomencladorEntity`, `@Unique(['nombre'])`, schema `MOD_NOMENCLATOR`) → herencia, decoradores de clase y formato original intactos; asignación insertada hereda la indentación del cuerpo.
+  10. **Cadena completa** sobre la entity editada (DTOs CRUD + mapper + repository + service + controller) → `tsc --noEmit` final: **0 errores nuevos en `src/`** (24/24 preexistentes).
+- **Hallazgos de la fase (corregidos en el mismo lote)**: guard de constructor-en-una-línea capturaba el caso normal `constructor(...) {` con cuerpo multi-línea; `)` de cierre perdido al reconstruir params en línea; params no removidos por anclaje `^` en líneas (pasó a cirugía por TEXTO); asignaciones con indent fija 8 espacios (ahora heredada).
+- **Pendiente siguiente**: F3 (repository concreto de nomenclador + MOD_NOMENCLATOR por defecto), F9-M1/M2 + F10-M2 (ListadoDto header==key, seed Funcion/endPoint contra el 403), F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad), F8-M1, decisiones F5-M2/F3-m1.

@@ -220,7 +220,11 @@ export default function EditarEntidadPage() {
         });
 
         if (resultado) {
-            toast.success(resultado.message);
+            const avisos = (resultado.avisos ?? []).filter(Boolean);
+            toast.success(resultado.message, {
+                description: avisos.length > 0 ? avisos.join('\n') : undefined,
+                duration: avisos.length > 0 ? 8000 : 4000,
+            });
         }
     };
 

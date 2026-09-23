@@ -17,18 +17,33 @@ interface ObtenerAtributosResponse {
     content: string;
 }
 
+interface DetalleCambio {
+    nombreAtributo: string;
+    tipoDato: string;
+    tipoRelacion?: string;
+    rEntity?: string;
+    nulo?: boolean;
+}
+
 interface ActualizarEntidadRequest {
     basePath: string;
     entityName: string;
     atributos: Atributo[];
     esquema?: string;
+    databaseType?: string;
 }
 
 interface ActualizarEntidadResponse {
     success: boolean;
     message: string;
     entityName: string;
-    atributosCount: number;
+    filePath?: string;
+    escrito?: boolean;
+    agregados?: DetalleCambio[];
+    eliminados?: DetalleCambio[];
+    sinCambios?: string[];
+    avisos?: string[];
+    atributosCount?: number;
 }
 
 export function useEditarEntidad() {

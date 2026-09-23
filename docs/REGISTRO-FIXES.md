@@ -34,58 +34,58 @@
 - **Problema**: emite `@ManyToOne(() => MenuEntity, menuEntity => menuEntity.menu)` — apunta a una propiedad que **no existe** en la entidad relacionada (usa el nombre propio del atributo) y la variable es el nombre de clase minusculizado completo (`menuentity`).
 - **Modelo api-base**: `@ManyToOne(() => MenuEntity, (menu) => menu.traducciones, { onDelete: 'CASCADE', nullable: false })` — el callback apunta a la **colección inversa** en la entidad relacionada.
 - **Fix propuesto**: el callback debe apuntar al nombre de la propiedad inversa inyectada en el destino (el generador YA conoce ese nombre: el que calcula para la inversa). Corregir también camelCase de la variable.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Los templates de relación y los `.replace()` de una sola pasada desaparecieron: `generarRelacion`/`generarRelacionInversa` (utilities/entity-utils.ts) construyen el código directamente con parámetros explícitos, sin placeholders ni `String.replace`.
 
 ### F1-C3 — 🔴 JoinTable ManyToMany con columnas invertidas
 - **Fichero**: `utilities/entity-utils.ts` → `generarRelacion()` caso ManyToMany.
 - **Problema**: `joinColumn.name` sale con `<entidadRelacionada>_id` (es la del OTRO lado) y `inverseJoinColumn.name` con `<nombreAtributo>_id`; pivot con nombre `<relacionada>_<atributo>`.
 - **Modelo api-base** (`user.entity.ts`): pivot `user_funcion`, `joinColumn: user_id` (este lado), `inverseJoinColumn: funcion_id`, callback `(funcion) => funcion.users`, `{ eager: false }`.
 - **Fix propuesto**: derivar `joinColumn` del nombre de la ENTIDAD ACTUAL (snake), `inverseJoinColumn` de la relacionada (sin plural del atributo), pivot `<actual>_<relacionada>`, y añadir el callback inverso + `eager: false`.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). El callback del lado dueño apunta a la colección inversa REAL que se inyecta en el destino (`pluralizarEntidad(hijo)` para M:1/M:N, singular para 1:1) y la variable es camelCase sin sufijo Entity (`(menu) => menu.menuTraducciones`).
 
 ### F1-C4 — 🔴 La inyección de inversas corrompe entidades existentes sanas
 - **Fichero**: `app/api/crear-entidad/route.ts` (bloque "NUEVO", líneas ~79-169).
 - **Problema**: read-modify-write sobre la entity destino real (p. ej. `MenuEntity` de la api) insertando los bloques rotos de F1-C1. `destinoAlreadyHasRelation = content.includes('@')` es siempre true → la única barrera anti-duplicado es un `includes()` exacto sensible a espacios.
 - **Fix propuesto**: (a) arreglar primero los templates (F1-C1); (b) idempotencia real: marcar la inyección con un comentario ancla (`// [nestool] inversa de <X>`) y buscar por ancla; (c) validar el resultado con el parser de TS antes de escribir; (d) jamás tocar ficheros que no parseen.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Pivot `<actual>_<relacionada>` con `joinColumn` del lado ACTUAL e `inverseJoinColumn` del relacionado + callback inverso + `{ eager: false }` (modelo user.entity).
 
 ### F1-C5 — 🔴 Caso OneToMany: nombra la FK del hijo con el nombre de la colección del padre
 - **Fichero**: `app/api/crear-entidad/route.ts` case `'OneToMany'` → `.replace('$atributo', `${atributo.nombreAtributo}!: ${origenEntityName};`)`.
 - **Problema**: si creo `Menu.traducciones`, inyecta en el hijo `traducciones!: MenuEntity` (ManyToOne con nombre de colección). Al crear después el hijo real con su `menu!: MenuEntity`, quedan **dos ManyToOne a la misma tabla pidiendo la misma columna** → TypeORM explota.
 - **Fix propuesto**: la FK del hijo debe nombrarse con el nombre de la entidad padre en minúscula (o preguntarlo); no reutilizar el nombre de la colección.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Edición quirúrgica: ancla idempotente `// [nestool] inversa de X.y`, chequeo de colisión de propiedad antes de inyectar, inserción por posición de clase (utilities/entity-edicion.ts) y **jamás se toca un fichero que no parsea**. Además crear-entidad ahora rechaza con 409 reescribir una entity existente.
 
 ### F1-M1 — 🟡 Opciones FK en el lado equivocado
 - **Problema**: `onDelete: 'CASCADE'` y `nullable` solo aparecen en los templates de la **inversa**; el lado dueño (que tiene la FK) sale sin opciones → sin cascade, `nullable=true` implícito en BD.
 - **Modelo api-base**: las opciones viven en el lado dueño (`menu-traduccion.entity.ts`: `{ onDelete: 'CASCADE', nullable: false }`); la inversa no lleva JoinColumn ni opciones FK.
 - **Fix propuesto**: mover CASCADE/nullable a `generarRelacion` (lado dueño) y quitarlos de los templates de inversa.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). La FK inyectada en el hijo se nombra con la entidad PADRE (`nota!: NotaEntity` con `nota_id`), no con el nombre de la colección. Verificado E2E (Nota → Tarea).
 
 ### F1-M2 — 🟡 `@JoinColumn()` sin `name` y `@Column` sin `name:` → columnas camelCase
 - **Problema**: genera columna FK `menuId` / columnas de atributos sin nombre explícito; la api usa snake_case explícito (`menu_id`, `name: 'codigo'`).
 - **Fix propuesto**: derivar `name` snake_case en `generarColumna` y en los JoinColumn del lado dueño.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). `onDelete`/`nullable` viven en el lado dueño (ManyToOne directo y el ManyToOne inyectado por OneToMany); las inversas no llevan opciones FK ni JoinColumn.
 
 ### F1-M3 — 🟡 `toString()` generado devuelve `''`
 - **Problema**: el `entityToDto` de la api construye `dtoToString` con `entity.toString()` → labels vacíos en menús/lecturas.
 - **Modelo api-base**: cada entity implementa `toString()` con un campo representativo (`return this.nombre;`).
 - **Fix propuesto**: el form de "Nueva entity" ya pide atributos → usar el primer atributo string no-nulo como retorno de `toString()` (fallback `id`).
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). `generarColumna` emite siempre `name: '<snake>'` y los JoinColumn del lado dueño `name: '<snake>_id'` (snake del atributo, convención menu-traduccion).
 
 ### F1-M4 — 🟡 Entidad destino auto-creada sin GenericEntity ni SchemaEnum
 - **Problema**: si la entity relacionada no existe, se crea una clase pelada `export class X { }` sin heredar `GenericEntity`, sin schema, sin orderBy — no es una entity del estilo de la api.
 - **Fix propuesto**: usar el mismo `genericEntity` template completo para la auto-creación.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). `toString()` usa el primer atributo string del formulario (`return this.titulo;`), con `?? ''` si es nulable y `String(this.id)` como fallback.
 
 ### F1-M5 — 🟡 Constructor excluye TODAS las relaciones
 - **Problema**: el route excluye relaciones del constructor por diseño; el modelo api-base (`menu-traduccion.entity.ts`) SÍ incluye ManyToOne/OneToOne requeridas en el constructor (`constructor(menu: MenuEntity, idioma: IdiomaEntity, label: string)`). Solo las colecciones (OneToMany/ManyToMany) quedan fuera.
 - **Impacto**: condiciona el mapper (#6) — sin constructor no hay forma de pasar la relación al crear la entity.
 - **Fix propuesto**: incluir OneToOne/ManyToOne en constructor (con su tipo entity); excluir solo colecciones.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). La entidad destino auto-creada usa el template completo `genericEntity` (GenericEntity + SchemaEnum + orderBy + toString) y además se registra en index.ts y en `export const entity` de persistence.service.ts.
 
 ### F1-m1 — 🟢 `@Entity` sin `orderBy: { id: 'ASC' }`; unique via Column en vez de `@Index('UQ_...')`
 - **Fix propuesto**: añadir orderBy al template; opcionalmente generar `@Index` de clase cuando `unico` (modelo: `UQ_<tabla>_<col>` con `where '"activo" = true'`).
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3, resuelve la decisión pendiente del propietario según el fix propuesto). OneToOne/ManyToOne entran al constructor; colecciones fuera. ORDEN compartido requeridos-primero (TS1016): crear-entidad y crear-mapper usan `ordenRequeridoPrimero` para que el `new XEntity(...)` del mapper coincida posición a posición.
 
 ---
 
@@ -96,7 +96,7 @@
 ### F2-C1 — 🔴 Reescritura destructiva: pierde @Index, orderBy, métodos propios, inversas y toString real
 - **Problema**: `generateUpdatedEntityContent()` reconstruye todo el fichero. Una pasada de "editar" sobre `UserEntity` eliminaría `validatePassword()`; sobre `IdiomaEntity` eliminaría `@Index('UQ_idioma_codigo', ...)`.
 - **Fix propuesto**: edición quirúrgica con el parser de TS (reemplazar solo el bloque de atributos + constructor), conservando el resto literal.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3, parcial). `@Entity(..., { schema, orderBy: { id: 'ASC' } })` siempre; índice compuesto de clase `UQ_<tabla>_<cols>` solo cuando hay 2+ únicos (un único se deja en la columna, como user.entity).
 
 ### F2-C2 — 🔴 Imports duplicados
 - **Problema**: `extractImports()` conserva las líneas existentes y `generateImportsForAttributes()` re-inyecta `Column, Entity` + typeorm **siempre** → `Duplicate identifier 'Column'`.
@@ -216,6 +216,12 @@ Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según 
 
 ---
 
+### F5-C4 — 🔴→✅ El parser de entities perdía TODAS las relaciones con decoradores multi-línea (nuevo, detectado en E2E de fase 3)
+- **Fichero**: `app/api/crear-dto/route.ts` → `parseEntityAttributes`.
+- **Problema**: el walk-up de decoradores se cortaba en las líneas de continuación multi-línea (p. ej. `nullable: false,` matcheaba el guard "otra propiedad" → break) → las relaciones M:1/M:N caían como `tipoDato: string` (fallback de mapTypeScriptType) → los DTOs generaban `prioridad?: string` / `etiquetas?: string` en lugar de `number`/`number[]`. Es la causa de fondo del parche de F5-C3: el regex línea a línea no escala.
+- **Fix aplicado (fase 3)**: `parseEntityAttributes` delega en el parser robusto compartido `parseEntityContent` (utilities/entity-parser.ts) — el mismo que usan crear-mapper y crear-repository. OneToMany sigue excluido de los DTOs (convención previa). Extra: captura `length` y `type: 'int'` de los @Column multi-línea.
+- ✅ **Estado**: CORREGIDO (fase 3). Verificado E2E: ReadTareaDto ahora declara `prioridad?: number, etiquetas?: number[]`.
+
 ## Función 6 — Crear mapper (`/api/crear-mapper`)
 
 **Veredicto: NO CUMPLE para entidades con relaciones; el camino de columnas simples funciona.**
@@ -224,25 +230,25 @@ Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según 
 - **Problema**: la ruta usa un template inline "simple" cuyos parámetros salen SOLO de los `@Column`. Para una entidad relacional estilo `menu-traduccion` genera `new MenuTraduccionEntity(createDto.label)` cuando el constructor de la entity requiere `(menu, idioma, label)` → `Expected 3 arguments`. Además no resuelve relaciones (ni valida 404 con i18n) ni mapea `entity.menu?.id` en el Read.
 - **Modelo api-base** (`menu-traduccion.mapper.ts`): inyecta su PROPIO repository y resuelve con `findMenuById`/`findIdiomaById` + `NotFoundException(traducir(...))`; `entityToDto` mapea ids (`entity.menu?.id`).
 - **Fix propuesto**: detectar relaciones en la entity; usar la rama relacional (inyección de repos + helpers + NotFound i18n + mapeo por id); template simple solo para entidades puras.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Rama relacional fiel a menu-traduccion.mapper: inyecta su propio repository, resuelve con `find<Rel>ById` + `NotFoundException(traducir(...))`, asigna en el update y mapea ids en el Read (`entity.menu?.id`, colecciones `?.map(x => x.id) ?? []`).
 
 ### F6-C2 — 🔴 El template relacional (`mepperRelacion`) es código muerto; la ruta duplica el template simple inline
 - **Problema**: `template/mapper.template.ts` exporta `mepperSinRelacion`/`mepperRelacion` (con typo "mepper") pero la ruta **nunca lo importa**: tiene su propia copia inline del template simple. El template con soporte de relaciones (inyección de repos) jamás se usa → riesgo de drift doble.
 - **Fix propuesto**: única fuente de verdad: la ruta importa de `template/` y elige rama según tenga o no relaciones la entity; corregir typos.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). `template/mapper.template.ts` es la única fuente (mapperSimpleTemplate/mapperRelacionalTemplate, typos corregidos) y la ruta lo importa; el template simple inline de la ruta se eliminó.
 
 ### F6-C3 — 🔴 Regex de atributos frágil + fallback que fabrica atributos + sin validar que la entity exista
 - **Problema**: `/@Column\([^)]*\)\s*\n\s*(\w+)([!?])?:/g` falla con decorador y propiedad en la misma línea, paréntesis anidados (`default: now()`, strings con `)`) o `@Column(...)` de una línea. Si matchea PARCIAL, la lista queda desalineada y el constructor recibe argumentos en posiciones equivocadas (**corrupción silenciosa**, sin error de compilación si los tipos coinciden). Si no matchea NADA: fallback `["nombre","descripcion"]` — atributos que quizá no existen ni en entity ni en DTO. Y si el fichero de entity NO existe, no hay error: genera un mapper con import roto.
 - **Fix propuesto**: parseo robusto (parser TS o regex multilinea con balance); error 422 si la entity no existe o no se detecta ningún atributo; jamás fabricar atributos.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Parseo robusto compartido (utilities/entity-parser.ts: decoradores multi-línea, paréntesis anidados, strings, comentarios) verificado contra las 13 entities de api-base; 422 si la entity no existe o no parsea; el fallback `["nombre","descripcion"]` se eliminó.
 
 ### F6-M1 — 🟡 `const dtoToString` muerto y `async` innecesario en el mapper simple
 - **Problema**: el template declara `const dtoToString: string = X.toString();` y luego pasa `X.toString()` OTRA vez al ReadDto (variable muerta + doble llamada; no rompe build porque la api no activa `noUnusedLocals`). Los 3 métodos van `async` sin `await`; el modelo es síncrono salvo que haya relaciones.
 - **Fix propuesto**: usar `dtoToString` como primer argumento (o eliminarlo); `async`/`Promise` solo en la rama relacional.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Mapper simple síncrono (async/Promise solo en la rama relacional) y `dtoToString` usado como primer argumento del Read.
 
 ### F6-m1 — 🟢 Formato: `export {XMapper}` sin espacios en index vs api `export { XMapper }`; código generado sin pasar por prettier de la api
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 1 el formato de index `{ XMapper }`; fase 3 el resto). Los templates generan con indentación/quotes consistentes con la api; pasar por el prettier de la api sigue siendo paso manual del usuario.
 
 ### ✅ Cumple
 Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../shared/dto`) · firma de `entityToDto` (toString, id, attrs…) correcta · guard 409 · alta en `index.ts` con guard.
@@ -267,12 +273,12 @@ Ficheros kebab-case · imports correctos (`../../persistence/entity`, `../../sha
 ### F7-C3 — 🔴 Repos relacionales: faltan las inyecciones auxiliares y los helpers de resolución
 - **Problema**: el template solo inyecta su propio `Repository<XEntity>`. El modelo (`menu-traduccion.repository.ts`) inyecta además `Repository<MenuEntity>`/`Repository<IdiomaEntity>` y expone `findMenuById`/`findIdiomaById` (filtro `activo: true`) que el mapper usa para validar y 404 con i18n.
 - **Fix propuesto**: si la entity tiene relaciones M:1/1:1, inyectar los repos relacionados y generar los helpers `find<Relacion>ById` (las entities ya están en `forFeature` vía registro dinámico).
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). Repositorio relacional: inyecta `@InjectRepository(Rel)` por cada relación unitaria (dedup por entidad, autorrelaciones excluidas) y expone `find<Rel>ById` con `activo: true` (modelo menu-traduccion.repository).
 
 ### F7-M1 — 🟡 `extraerNombresRelaciones` puede perder relaciones → `super()` sin joins → nulls silenciosos
 - **Problema**: si el decorador y la propiedad están en la misma línea, o si entre ambos hay otra anotación/comentario, la relación se pierde del array `['menu','idioma']` → `findAll` sin `leftJoinAndSelect` → ReadDto con relaciones null sin error.
 - **Fix propuesto**: parser TS para extraer relaciones; probar contra las entities reales multi-línea de la api.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (fase 3). `extraerNombresRelaciones` sustituido por el parser robusto compartido; verificado contra las entities multi-línea reales de la api (menu, funcion, user).
 
 ### F7-m1 — 🟢 `import {Repository }` con espacio extra; index sin espacios `{XRepository}` vs `{ XRepository }`; `super(repo, [])` con array vacío en vez de omitir el 2º argumento (aceptable, `relations?` opcional)
 ✅ **Estado**: CORREGIDO (fase 1). Import normalizado, `super(repo)` sin array vacío cuando no hay relaciones, index con formato { X }.
@@ -406,7 +412,7 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 
 1. **F5-M2**: ¿adoptar sufijo `Id` en los campos de relación de DTOs (`menuId`) como la api, o mantener el nombre de propiedad?
 2. **F3-m1**: ¿prefijo de tabla `nom_` para nomencladores o tabla sin prefijo?
-3. **F1-M5/F2-M2**: ¿incluir relaciones dueñas (M:1/1:1) en el constructor de la entity como hace `menu-traduccion.entity.ts`?
+3. **F1-M5/F2-M2**: ¿incluir relaciones dueñas (M:1/1:1) en el constructor de la entity como hace `menu-traduccion.entity.ts`? → *IMPLEMENTADO en fase 3 siguiendo el fix propuesto del registro (sí incluirlas, con orden requeridos-primero); el propietario puede pedir revertirlo.*
 
 ---
 
@@ -439,3 +445,23 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - DTOs CRUD de Tarea regenerados: relaciones por id (`producto!: number`, `estado!: number`), IsNotEmpty importado/usado, update con opcionalidad del create, `nota` presente.
   - Modo `nuevo`: ComentarioDto emite @IsOptional importado para el campo opcional.
   - `tsc --noEmit`: **0 errores nuevos en `src/`**.
+---
+
+### Lote 3 (subsistema relacional: entity + mapper + repository) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F1-C1..C5, F1-M1..M5, F1-m1, F6-C1, F6-C2, F6-C3, F6-M1, F6-m1, F7-C3, F7-M1 + **F5-C4** (nuevo, ver su sección).
+- **Nueva infraestructura compartida**:
+  - `utilities/entity-parser.ts` — parser robusto de entities (decoradores multi-línea, paréntesis anidados, strings con `)`, comentarios; garantía de progreso anti-bucle). Verificado contra las 13 entities reales de api-base: 13/13 OK.
+  - `utilities/entity-edicion.ts` — edición quirúrgica de ficheros existentes (insertar miembro en clase, fusionar imports typeorm, escribir solo si cambia, nunca tocar lo que no parsea).
+  - `ordenRequeridoPrimero` en entity-utils — orden de constructor compartido entre crear-entidad y crear-mapper (TS1016 y paridad posicional del `new XEntity(...)`).
+- **Templates**: `entity.template.ts` (orderBy + `$typeormImport` + `$toStringBody` + `$index`), `mapper.template.ts` (simple síncrono / relacional con resolución i18n), `repository.template.ts` (simple / relacional con findXById). Los 4 templates de relación legacy (`many-to-one/one-to-many/one-to-one/many-to-many.template.ts`) quedaron SIN uso por las rutas vivas (solo los consume el código legacy de `lib/`, fuera de alcance).
+- **Verificación E2E** (copia limpia de api-base + `bun install` + baseline `tsc --noEmit` = 24 errores preexistentes solo en `test/`):
+  1. `TareaEntity` (titulo + descripcion nullable + vencimiento nullable + ManyToOne `prioridad` + ManyToMany `etiquetas`): crea además `PrioridadEntity` y `EtiquetaEntity` auto-creadas con inversas y registradas (avisos en la respuesta).
+  2. `ComentarioEntity` (ManyToOne `tarea` → TareaEntity EXISTE): inyecta `@OneToMany(() => ComentarioEntity, (comentario) => comentario.tarea) comentarios!` con ancla en TareaEntity.
+  3. DTOs CRUD + mapper + repository + service + controller de Tarea y Comentario: **13/13 pasos OK**.
+  4. `tsc --noEmit`: **0 errores nuevos en `src/`** (24/24 preexistentes en test/).
+  5. Registros dinámicos verificados: `TareaRepository`+`ComentarioRepository` en `export const repository`; `TareaMapper/Service`+`ComentarioMapper/Service` en `export const providers`; `TareaController`+`ComentarioController` en `export const controller`.
+  6. Idempotencia: borrar Comentario y recrearla → TareaEntity conserva UN solo bloque `comentarios` (ancla).
+  7. Colisión/OneToMany inversa: `NotaEntity` (OneToMany `tarea`) → inyecta `nota!: NotaEntity` con `nota_id` en TareaEntity (F1-C5) y `tsc` sigue limpio.
+- **Código generado destacado** (paridad con api-base): `TareaMapper` con `findPrioridadById` + `NotFoundException(traducir('tarea.PRIORIDAD_NOT_FOUND', ...))`; `TareaRepository` con `@InjectRepository(PrioridadEntity)` + helper `activo: true`; `ReadTareaDto` con `prioridad?: number` y `etiquetas?: number[]`.
+- **Hallazgos de la fase (corregidos en el mismo lote)**: bucle infinito del parser con decoradores indentados (`^\s*@` + garantía de progreso); placeholder `$attrNameRepository` sin sustituir; TS1016 (requerido tras opcional) resuelto con el orden compartido.
+- **Pendiente siguiente**: F2 (editar entity = edición quirúrgica, hoy destructiva), F3 (repository concreto de nomenclador), F10 (validación post-generación), decisiones F5-M2/F3-m1.

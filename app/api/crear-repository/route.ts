@@ -2,71 +2,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { formatearNombre, eliminarSufijo, aInicialMinuscula } from '@/utilities/entity-utils';
+import { cargarEntity, EntityInfo, RelacionEntity } from '@/utilities/entity-parser';
+import { repositorySimpleTemplate, repositoryRelacionalTemplate } from '@/template/repository.template';
 
-const repositoryTemplate = `import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { GenericRepository } from './generic.repository';
-import { IRepository } from '../../shared/interface';
-import { $nameEntity } from '../entity';
-
-@Injectable()
-export class $nameRepository extends GenericRepository<$nameEntity> implements IRepository<$nameEntity> {
-    constructor(
-        @InjectRepository($nameEntity)
-        private $paramRepository: Repository<$nameEntity>,
-    ) {
-        super($paramRepository$superArgs);
-    }
-
-}`;
-
-// Extrae los nombres de las propiedades de relacion tal y como estan declaradas
-// en la entidad (soporta decoradores en multiples lineas, @JoinColumn, etc.).
-// El nombre de la propiedad debe coincidir EXACTAMENTE con el atributo de la
-// entidad para que TypeORM resuelva el join.
-function extraerNombresRelaciones(entityContent: string): string[] {
-    const relaciones: string[] = [];
-    const lineas = entityContent.split('\n');
-    const regexRelacion = /@(OneToOne|OneToMany|ManyToOne|ManyToMany)\(/;
-    const regexPropiedad = /^\s*(\w+)(\?)?(!)?:\s*[\w\[\]]+.*;?\s*$/;
-
-    for (let i = 0; i < lineas.length; i++) {
-        if (regexRelacion.test(lineas[i])) {
-            // Buscar hacia adelante la primera declaracion de propiedad
-            for (let j = i + 1; j < lineas.length; j++) {
-                const linea = lineas[j].trim();
-                if (regexPropiedad.test(linea)) {
-                    const match = linea.match(regexPropiedad);
-                    if (match && !relaciones.includes(`'${match[1]}'`)) {
-                        relaciones.push(`'${match[1]}'`);
-                    }
-                    break;
-                }
-                // Si aparece otro decorador de relacion seguido, seguir buscando
-                // (JoinTable/JoinColumn no cortan la busqueda)
-                if (/^\s*@(?!OneToOne|OneToMany|ManyToOne|ManyToMany|Join)/.test(lineas[j])) {
-                    break;
-                }
-            }
-        }
-    }
-    return relaciones;
-}
+// Fase 3 (F7-C3 / F7-M1): repositorios fieles al modelo menu-traduccion.repository.ts.
+//  - Parseo robusto de relaciones con utilities/entity-parser (nombres de propiedad
+//    EXACTOS, soporta decoradores multi-línea).
+//  - Si la entity tiene relaciones unitarias (ManyToOne/OneToOne), el repository
+//    inyecta además los repositories de las entidades relacionadas y expone los
+//    helpers findXById (filtro activo: true) que el mapper usa para el 404 i18n.
+//  - Las relaciones a la PROPIA entidad (autorrelación) no generan inyección
+//    auxiliar: el repository propio ya consulta esa tabla (modelo MenuRepository).
+//  - El registro sigue siendo dinámico: array `export const repository` de
+//    persistence.service.ts (fase 1, F7-C1/C2).
 
 export async function POST(req: NextRequest) {
     try {
-        const { entityName, basePath, relations = [] } = await req.json();
+        const { entityName, basePath } = await req.json();
 
         if (!entityName || !basePath) {
-            return NextResponse.json({ 
-                error: 'entityName y basePath son requeridos' 
+            return NextResponse.json({
+                error: 'entityName y basePath son requeridos'
             }, { status: 400 });
         }
 
         if (!/^[A-Z][a-zA-Z0-9]*$/.test(entityName)) {
-            return NextResponse.json({ 
-                error: 'El nombre de la entidad debe empezar con mayúscula' 
+            return NextResponse.json({
+                error: 'El nombre de la entidad debe empezar con mayúscula'
             }, { status: 400 });
         }
 
@@ -81,40 +43,86 @@ export async function POST(req: NextRequest) {
         // La clase real siempre termina en "Entity" (así la crea crear-entidad)
         const entityClassName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         const repositoryClassName = nombre + 'Repository';
-        const fileName = `${formatearNombre(nombre, '-')}.repository.ts`;
+        const kebab = formatearNombre(nombre, '-');
+        const fileName = `${kebab}.repository.ts`;
         const filePath = path.join(repositoryDir, fileName);
 
         if (existsSync(filePath)) {
-            return NextResponse.json({ 
-                error: `El repository ${repositoryClassName} ya existe` 
+            return NextResponse.json({
+                error: `El repository ${repositoryClassName} ya existe`
             }, { status: 409 });
         }
 
-        // Leer la entidad para obtener las relaciones (por el NOMBRE de la propiedad declarada)
-        const entityPath = path.join(basePath, `src/persistence/entity/${formatearNombre(nombreSinEntity, '-')}.entity.ts`);
-        let relaciones: string[] = [];
-
-        if (existsSync(entityPath)) {
-            const entityContent = readFileSync(entityPath, 'utf-8');
-            relaciones = extraerNombresRelaciones(entityContent);
+        // Parseo robusto de la entity (422 si no existe o no parsea)
+        const entityPath = path.join(basePath, `src/persistence/entity/${kebab}.entity.ts`);
+        let info: EntityInfo;
+        try {
+            info = cargarEntity(entityPath, entityClassName);
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            return NextResponse.json({ error: message }, { status: 422 });
         }
 
-        // Preparar template
-        let template = repositoryTemplate;
-        template = template.replace(/\$nameEntity/g, entityClassName);
-        template = template.replace(/\$name/g, nombre);
-        template = template.replace(/\$param/g, nombreLower);
-        // El 2º argumento de super() (relations) es opcional: se omite si no hay relaciones
-        const superArgs = relaciones.length > 0 ? `, [${relaciones.join(', ')}]` : '';
-        template = template.replace(/\$superArgs/g, superArgs);
+        const unitarias = info.relaciones.filter((r) => r.tipoRelacion === 'ManyToOne' || r.tipoRelacion === 'OneToOne');
+        // Relaciones a la propia entidad: sin repos auxiliares (autorrelación)
+        const auxiliares = unitarias.filter((r) => r.destino && r.destino !== entityClassName);
+        if (unitarias.some((r) => !r.destino)) {
+            return NextResponse.json({
+                error: `La entity ${entityClassName} tiene relaciones unitarias sin entidad destino detectable; no se puede generar el repository relacional.`
+            }, { status: 422 });
+        }
+
+        // Nombres de TODAS las relaciones (en orden de declaración) para super(repo, [...])
+        const relationsArgs = info.relaciones.map((r) => `'${r.nombre}'`).join(', ');
+
+        let template: string;
+        if (auxiliares.length > 0) {
+            // --- Repositorio relacional (F7-C3) ---
+            // Una inyección + un helper POR ENTIDAD RELACIONADA (deduplicados)
+            const entidadesAux: string[] = [];
+            const inyecciones: string[] = [];
+            const helpers: string[] = [];
+            const campoPorEntidad = new Map<string, string>();
+            for (const r of auxiliares) {
+                if (!campoPorEntidad.has(r.destino)) {
+                    const campo = `${aInicialMinuscula(eliminarSufijo(r.destino, 'Entity'))}Repository`;
+                    campoPorEntidad.set(r.destino, campo);
+                    entidadesAux.push(r.destino);
+                    inyecciones.push(`        @InjectRepository(${r.destino})\n        private ${campo}: Repository<${r.destino}>,`);
+                    helpers.push([
+                        ``,
+                        `    async find${eliminarSufijo(r.destino, 'Entity')}ById(id: number): Promise<${r.destino} | null> {`,
+                        `        return this.${campo}.findOne({ where: { id, activo: true } });`,
+                        `    }`,
+                    ].join('\n'));
+                }
+            }
+            const entidadesImport = Array.from(new Set([entityClassName, ...entidadesAux])).join(', ');
+
+            template = repositoryRelacionalTemplate
+                .replace(/\$entidadesImport/g, entidadesImport)
+                .replace(/\$inyeccionesAuxiliares/g, inyecciones.join('\n'))
+                .replace(/\$relations/g, relationsArgs)
+                .replace(/\$helpers/g, helpers.join('\n'))
+                .replace(/\$param/g, nombreLower)
+                .replace(/\$name/g, nombre);
+        } else {
+            // --- Repositorio simple ---
+            // El 2º argumento de super() (relations) es opcional: se omite si no hay relaciones
+            const superArgs = info.relaciones.length > 0 ? `, [${relationsArgs}]` : '';
+            template = repositorySimpleTemplate
+                .replace(/\$superArgs/g, superArgs)
+                .replace(/\$param/g, nombreLower)
+                .replace(/\$name/g, nombre);
+        }
 
         // Escribir archivo
         writeFileSync(filePath, template);
 
         // Actualizar index.ts (formato con espacios, igual al de la api)
         const indexPath = path.join(repositoryDir, 'index.ts');
-        const exportStatement = `export { ${repositoryClassName} } from './${formatearNombre(nombre, '-')}.repository';\n`;
-        
+        const exportStatement = `export { ${repositoryClassName} } from './${kebab}.repository';\n`;
+
         if (existsSync(indexPath)) {
             const indexContent = readFileSync(indexPath, 'utf-8');
             if (!indexContent.includes(`export { ${repositoryClassName} }`)) {
@@ -160,16 +168,16 @@ export async function POST(req: NextRequest) {
             writeFileSync(servicePath, serviceContent);
         }
 
-        return NextResponse.json({ 
-            success: true, 
+        return NextResponse.json({
+            success: true,
             message: `Repository ${repositoryClassName} creado exitosamente`,
             filePath: filePath
         });
 
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return NextResponse.json({ 
-            error: `Error al crear el repository: ${message}` 
+        return NextResponse.json({
+            error: `Error al crear el repository: ${message}`
         }, { status: 500 });
     }
 }

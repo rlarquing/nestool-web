@@ -1,5 +1,26 @@
 // Template de entidad genérica para generación dinámica
-export const genericEntity: string = `\nimport {Column, Entity, $typeorm} from "typeorm";\nimport {GenericEntity} from "./generic.entity";\nimport { SchemaEnum } from '../../database/schema/schema.enum';\n$import\n\n@Entity('$entidad', { schema: SchemaEnum.$schema })\nexport class $nameEntity extends GenericEntity {\n\n    $atributos\n\n    constructor($parametros) {\n        super();\n        $thisAtributos\n    }\n\n   public toString(): string {\n        return '';\n    }\n}\n`;
+// Fase 3: orderBy en el @Entity (F1-m1), toString real (F1-M3) e import typeorm
+// completo provisto por la ruta (sin comas colgantes).
+export const genericEntity: string = `$typeormImport
+import { GenericEntity } from './generic.entity';
+import { SchemaEnum } from '../../database/schema/schema.enum';
+$import
+
+$index@Entity('$entidad', { schema: SchemaEnum.$schema, orderBy: { id: 'ASC' } })
+export class $nameEntity extends GenericEntity {
+
+    $atributos
+
+    constructor($parametros) {
+        super();
+        $thisAtributos
+    }
+
+    public toString(): string {
+        $toStringBody
+    }
+}
+`;
 export const genericNomencladorEntity=`
 import {Entity} from "typeorm";
 import {GenericNomencladorEntity} from "./generic-nomenclador.entity";

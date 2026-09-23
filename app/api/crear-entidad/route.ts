@@ -1,12 +1,164 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
-import { formatearNombre, eliminarSufijo, generarColumna, generarRelacion } from '@/utilities/entity-utils';
+import {
+    formatearNombre, eliminarSufijo, generarColumna, generarRelacion, generarRelacionInversa,
+    generarToStringBody, aInicialMinuscula, pluralizarEntidad, snakeDe, ordenRequeridoPrimero,
+} from '@/utilities/entity-utils';
+import { insertarMiembroEnClase, agregarImportAContent, fusionarImportsTypeorm, leerClase } from '@/utilities/entity-edicion';
 import { genericEntity } from '@/template/entity.template';
-import * as manyToOneTemplate from '@/template/many-to-one.template';
-import * as oneToManyTemplate from '@/template/one-to-many.template';
-import * as oneToOneTemplate from '@/template/one-to-one.template';
-import * as manyToManyTemplate from '@/template/many-to-many.template';
+
+// TypeORM imports que necesita la ENTIDAD DESTINO según la relación directa
+// que se le inyecta como inversa.
+function typeormImportsInversa(tipoRelacion: string): string[] {
+    switch (tipoRelacion) {
+        case 'ManyToOne': return ['OneToMany'];
+        case 'OneToMany': return ['ManyToOne', 'JoinColumn'];
+        case 'OneToOne': return ['OneToOne'];
+        case 'ManyToMany': return ['ManyToMany'];
+        default: return [];
+    }
+}
+
+/** Nombre de la propiedad que declara el bloque inverso generado. */
+function nombrePropiedadInversa(bloque: string): string | null {
+    const lineas = bloque.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (let i = lineas.length - 1; i >= 0; i--) {
+        const match = lineas[i].match(/^([A-Za-z_$][\w$]*)[?!]?:\s*[A-Za-z_$][\w$]*(\[\])?;/);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+interface ResultadoInyeccion {
+    avisos: string[];
+}
+
+/**
+ * Inyecta la relación inversa en la entity destino (F1-C1/C4/C5):
+ *  - fichero existente: edición quirúrgica con ancla idempotente, sin reescribir nada más;
+ *  - fichero inexistente: se crea con el template completo (GenericEntity + schema + orderBy)
+ *    y se registra en index.ts y en el registro dinámico de persistence.service.ts (F1-M4).
+ */
+function inyectarRelacionInversa(
+    basePath: string,
+    ctx: {
+        tipoRelacion: string;
+        nombreAtributo: string;
+        entidadOrigen: string;
+        entidadDestino: string;
+        coleccionInversa: string;
+        nombreInversa?: string;
+        requerido: boolean;
+    },
+    opciones: { esquema: string },
+): ResultadoInyeccion {
+    const avisos: string[] = [];
+    const entityDir = path.join(basePath, 'src/persistence/entity');
+    const kebabDestino = formatearNombre(eliminarSufijo(ctx.entidadDestino, 'Entity'), '-');
+    const destinoFilePath = path.join(entityDir, `${kebabDestino}.entity.ts`);
+    const bloque = generarRelacionInversa(ctx);
+    const ancla = `// [nestool] inversa de ${ctx.entidadOrigen}.${ctx.nombreAtributo}`;
+
+    let destinoContent = leerClase(destinoFilePath, ctx.entidadDestino);
+    if (destinoContent === null && existsSync(destinoFilePath)) {
+        avisos.push(`Entity ${ctx.entidadDestino} existe pero no se pudo parsear: NO se inyectó la relación inversa (fichero intacto).`);
+        return { avisos };
+    }
+
+    const esNueva = destinoContent === null;
+    if (esNueva) {
+        // F1-M4: entidad destino inexistente → template completo, no una clase pelada
+        destinoContent = genericEntity
+            .replace('$typeormImport', `import { Entity } from 'typeorm';`)
+            .replace('$import', '')
+            .replace('$index', '')
+            .replace('$entidad', formatearNombre(eliminarSufijo(ctx.entidadDestino, 'Entity'), '_'))
+            .replace('$schema', opciones.esquema)
+            .replace('$nameEntity', ctx.entidadDestino)
+            .replace('$atributos', bloque)
+            .replace('$parametros', '')
+            .replace('$thisAtributos', '')
+            .replace('$toStringBody', 'return String(this.id);');
+        avisos.push(`Entity ${ctx.entidadDestino} creada automáticamente (con la relación inversa) y registrada.`);
+    } else {
+        // Idempotencia por ancla (F1-C4)
+        if (destinoContent!.includes(ancla)) {
+            return { avisos };
+        }
+        // Colisión de propiedad: no corromper el fichero
+        const propiedad = nombrePropiedadInversa(bloque);
+        if (propiedad && new RegExp(`\\b${propiedad}\\s*[?!]?:`).test(destinoContent!)) {
+            avisos.push(`Entity ${ctx.entidadDestino} ya declara la propiedad "${propiedad}": no se inyectó la inversa duplicada.`);
+            return { avisos };
+        }
+        const insertado = insertarMiembroEnClase(destinoContent!, bloque);
+        if (insertado === null) {
+            avisos.push(`No se encontró el cuerpo de la clase en ${ctx.entidadDestino}: NO se inyectó la relación inversa.`);
+            return { avisos };
+        }
+        destinoContent = insertado;
+    }
+
+    // Imports de typeorm que necesita la inversa + import de la entity origen
+    destinoContent = fusionarImportsTypeorm(destinoContent!, typeormImportsInversa(ctx.tipoRelacion));
+    const importOrigen = `import { ${ctx.entidadOrigen} } from './${formatearNombre(eliminarSufijo(ctx.entidadOrigen, 'Entity'), '-')}.entity';`;
+    if (!destinoContent!.includes(`{ ${ctx.entidadOrigen} }`)) {
+        destinoContent = agregarImportAContent(destinoContent!, importOrigen);
+    }
+
+    if (!existsSync(entityDir)) {
+        mkdirSync(entityDir, { recursive: true });
+    }
+    writeFileSync(destinoFilePath, destinoContent!);
+
+    if (esNueva) {
+        registrarEntidadEnIndex(entityDir, ctx.entidadDestino, kebabDestino);
+        registrarEntidadEnPersistence(path.join(basePath, 'src/persistence/persistence.service.ts'), ctx.entidadDestino);
+    }
+    return { avisos };
+}
+
+/** Registra la entity en entity/index.ts (formato con espacios, igual al resto). */
+function registrarEntidadEnIndex(entityDir: string, className: string, kebab: string): void {
+    const indexPath = path.join(entityDir, 'index.ts');
+    const exportStatement = `export { ${className} } from './${kebab}.entity';\n`;
+    if (existsSync(indexPath)) {
+        const indexContent = readFileSync(indexPath, 'utf-8');
+        if (!indexContent.includes(`{ ${className} }`)) {
+            writeFileSync(indexPath, indexContent + exportStatement);
+        }
+    } else {
+        writeFileSync(indexPath, exportStatement);
+    }
+}
+
+/** Registra la entity en el array dinámico `export const entity` de persistence.service.ts. */
+function registrarEntidadEnPersistence(servicePath: string, className: string): void {
+    if (!existsSync(servicePath)) return;
+    let serviceContent = readFileSync(servicePath, 'utf-8');
+    const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/entity['"];?/;
+    if (importRegex.test(serviceContent)) {
+        serviceContent = serviceContent.replace(importRegex, (match, imports) => {
+            let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
+            if (!importList.includes(className)) importList.push(className);
+            importList = Array.from(new Set(importList));
+            return `import { ${importList.join(', ')} } from "./entity";`;
+        });
+    } else {
+        serviceContent = `import { ${className} } from "./entity";\n` + serviceContent;
+    }
+    const entityArrayRegex = /export\s+const\s+entity\s*=\s*\[([^\]]*)\]/;
+    if (entityArrayRegex.test(serviceContent)) {
+        serviceContent = serviceContent.replace(entityArrayRegex, (match, entities) => {
+            let entityList = entities.split(',').map((e: string) => e.trim()).filter(Boolean);
+            if (!entityList.includes(className)) entityList.push(className);
+            entityList = Array.from(new Set(entityList));
+            return `export const entity = [${entityList.join(', ')}]`;
+        });
+    }
+    writeFileSync(servicePath, serviceContent);
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -14,264 +166,182 @@ export async function POST(req: NextRequest) {
 
         // Validaciones básicas
         if (!entityName || !basePath) {
-            return NextResponse.json({ 
-                error: 'entityName y basePath son requeridos' 
+            return NextResponse.json({
+                error: 'entityName y basePath son requeridos'
             }, { status: 400 });
         }
 
         if (!atributos || !Array.isArray(atributos) || atributos.length === 0) {
-            return NextResponse.json({ 
-                error: 'Se requiere al menos un atributo' 
+            return NextResponse.json({
+                error: 'Se requiere al menos un atributo'
             }, { status: 400 });
         }
 
         // Validar que el nombre de la entidad sea válido
         if (!/^[A-Z][a-zA-Z0-9]*$/.test(entityName)) {
-            return NextResponse.json({ 
-                error: 'El nombre de la entidad debe empezar con mayúscula y contener solo letras y números' 
+            return NextResponse.json({
+                error: 'El nombre de la entidad debe empezar con mayúscula y contener solo letras y números'
             }, { status: 400 });
         }
 
         // Validar atributos
         for (const atributo of atributos) {
             if (!atributo.nombreAtributo || !atributo.tipoDato) {
-                return NextResponse.json({ 
-                    error: 'Todos los atributos deben tener nombre y tipo de dato' 
+                return NextResponse.json({
+                    error: 'Todos los atributos deben tener nombre y tipo de dato'
                 }, { status: 400 });
             }
 
             if (atributo.tipoDato === 'relation' && (!atributo.rEntity || !atributo.tipoRelacion)) {
-                return NextResponse.json({ 
-                    error: 'Los atributos de relación deben tener entidad relacionada y tipo de relación' 
+                return NextResponse.json({
+                    error: 'Los atributos de relación deben tener entidad relacionada y tipo de relación'
                 }, { status: 400 });
             }
+        }
+
+        // La clase exportada SIEMPRE termina en Entity
+        const className = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
+        const nombreBase = eliminarSufijo(className, 'Entity');
+        const kebab = formatearNombre(nombreBase, '-');
+        const nombreTabla = formatearNombre(nombreBase, '_');
+
+        const entityDir = path.join(basePath, 'src/persistence/entity');
+        const filePath = path.join(entityDir, `${kebab}.entity.ts`);
+        if (existsSync(filePath)) {
+            // F1-C4: jamás reescribir una entity existente con el template (destruiría código propio)
+            return NextResponse.json({
+                error: `La entity ${className} ya existe (${filePath})`
+            }, { status: 409 });
         }
 
         // Procesar atributos y generar código
         let importaciones: string[] = [];
         const atributosCode: string[] = [];
-        let typeormImports: string[] = ['Column', 'Entity'];
-        const parametrosConstructor: string[] = [];
-        const thisAtributos: string[] = [];
+        let typeormExtras: string[] = [];
+        const constructorAttrs: { param: string; asignacion: string; requerido: boolean }[] = [];
+        const avisos: string[] = [];
 
-        // Procesar cada atributo
+        const esquemaEnum = (esquema || 'public').toString().toUpperCase();
+
         for (const atributo of atributos) {
             if (atributo.tipoDato === 'relation') {
-                // Agregar imports necesarios para relaciones
+                // Imports typeorm del lado directo
                 if (atributo.tipoRelacion === 'OneToOne' || atributo.tipoRelacion === 'ManyToOne') {
-                    typeormImports.push('JoinColumn');
+                    typeormExtras.push('JoinColumn');
                 }
                 if (atributo.tipoRelacion === 'ManyToMany') {
-                    typeormImports.push('JoinTable');
+                    typeormExtras.push('JoinTable');
                 }
-                typeormImports.push(atributo.tipoRelacion);
+                typeormExtras.push(atributo.tipoRelacion);
 
-                // Agregar import de la entidad relacionada
-                const nombreArchivo = formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '-');
-                importaciones.push(`import { ${atributo.rEntity} } from './${nombreArchivo}.entity';`);
+                // Import de la entidad relacionada
+                const kebabRelacionada = formatearNombre(eliminarSufijo(atributo.rEntity, 'Entity'), '-');
+                importaciones.push(`import { ${atributo.rEntity} } from './${kebabRelacionada}.entity';`);
 
-                // Generar código de relación
-                atributosCode.push(generarRelacion(atributo));
+                // Nombres compartidos entre lado directo e inversa (F1-C2: el callback del
+                // lado dueño apunta SIEMPRE a la propiedad que realmente se inyecta en el destino).
+                const coleccionInversa = atributo.tipoRelacion === 'OneToOne'
+                    ? aInicialMinuscula(nombreBase)
+                    : pluralizarEntidad(className);
+                const nombreInversa = aInicialMinuscula(nombreBase);
 
-                // Patrón api-base: las relaciones NO van en el constructor de la
-                // entidad (ver idioma.entity.ts); la asignación definitiva la cubre "!"
+                atributosCode.push(generarRelacion(atributo, {
+                    entidadActual: className,
+                    coleccionInversa,
+                    nombreInversa,
+                }));
 
-                // --- NUEVO: Generar relación inversa en la entidad destino ---
-                try {
-                    // Definir nombres y paths
-                    const destinoEntityName = atributo.rEntity;
-                    const destinoFileName = `${formatearNombre(eliminarSufijo(destinoEntityName, 'Entity'), '-')}.entity.ts`;
-                    const destinoFilePath = path.join(basePath, 'src/persistence/entity', destinoFileName);
-                    const origenEntityName = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
-                    const origenFileName = `${formatearNombre(eliminarSufijo(origenEntityName, 'Entity'), '-')}.entity.ts`;
-                    // Leer o crear el archivo de la entidad destino
-                    let destinoContent = '';
-                    let destinoClassBody = '';
-                    let destinoImports = '';
-                    let destinoAlreadyHasImport = false;
-                    let destinoAlreadyHasRelation = false;
-                    if (existsSync(destinoFilePath)) {
-                        destinoContent = readFileSync(destinoFilePath, 'utf-8');
-                        destinoAlreadyHasImport = destinoContent.includes(origenEntityName);
-                        destinoAlreadyHasRelation = destinoContent.includes(`@`); // Simple check, mejorar si es necesario
-                    } else {
-                        // Crear archivo base si no existe
-                        destinoContent = `import { Entity } from 'typeorm';\n@Entity('${formatearNombre(eliminarSufijo(destinoEntityName, 'Entity'), '_')}')\nexport class ${destinoEntityName} {\n\n}`;
-                    }
-                    // Determinar el tipo de relación inversa y el nombre del atributo
-                    let inversaDecorador = '';
-                    let inversaAtributo = '';
-                    let inversaImport = `import { ${origenEntityName} } from './${formatearNombre(eliminarSufijo(origenEntityName, 'Entity'), '-')}.entity';`;
-                    let inversaTypeormImports = '';
-                    // Pluralizar el nombre del atributo si es necesario
-                    const pluralize = (str: string) => str.endsWith('s') ? str : str + 's';
-                    const lowerOrigen = origenEntityName.charAt(0).toLowerCase() + origenEntityName.slice(1);
-                    switch (atributo.tipoRelacion) {
-                        case 'ManyToOne':
-                            // Inversa: OneToMany
-                            inversaDecorador = oneToManyTemplate.destino.replace('$entity', origenEntityName)
-                                .replace('($name)', `(${lowerOrigen})`)
-                                .replace('$nAtributo', atributo.nombreAtributo)
-                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}!: ${origenEntityName}[];`);
-                            inversaTypeormImports = 'OneToMany';
-                            break;
-                        case 'OneToMany':
-                            // Inversa: ManyToOne
-                            inversaDecorador = manyToOneTemplate.origen.replace('$entity', origenEntityName)
-                                .replace('($name)', `(${lowerOrigen})`)
-                                .replace('$nAtributos', pluralize(atributo.nombreAtributo))
-                                .replace('$atributo', `${atributo.nombreAtributo}!: ${origenEntityName};`);
-                            inversaTypeormImports = 'ManyToOne, JoinColumn';
-                            break;
-                        case 'OneToOne':
-                            // Inversa: OneToOne
-                            inversaDecorador = oneToOneTemplate.origen.replace('$entity', origenEntityName)
-                                .replace('($name)', `(${lowerOrigen})`)
-                                .replace('$atributo', `${atributo.nombreAtributo}!: ${origenEntityName};`);
-                            inversaTypeormImports = 'OneToOne, JoinColumn';
-                            break;
-                        case 'ManyToMany':
-                            // Inversa: ManyToMany (sin JoinTable)
-                            inversaDecorador = manyToManyTemplate.destino.replace('$entity', origenEntityName)
-                                .replace('($entidad)', `(${lowerOrigen})`)
-                                .replace('$nAtributo', atributo.nombreAtributo)
-                                .replace('$atributo', `${pluralize(atributo.nombreAtributo)}!: ${origenEntityName}[];`);
-                            inversaTypeormImports = 'ManyToMany, JoinColumn';
-                            break;
-                        default:
-                            break;
-                    }
-                    // Insertar import si no existe
-                    if (!destinoAlreadyHasImport && !destinoContent.includes(inversaImport)) {
-                        destinoContent = destinoContent.replace(/(import [^;]+;\n)/, `$1${inversaImport}\n`);
-                    }
-                    // Insertar decorador y atributo si no existe
-                    if (!destinoAlreadyHasRelation || !destinoContent.includes(inversaDecorador.trim())) {
-                        // Insertar antes del constructor o al final de la clase
-                        destinoContent = destinoContent.replace(/(constructor\([^)]*\) {[^}]*})/, `${inversaDecorador}\n    $1`);
-                        if (!/constructor\(/.test(destinoContent)) {
-                            destinoContent = destinoContent.replace(/(}\s*)$/, `    ${inversaDecorador}\n$1`);
-                        }
-                    }
-                    // Insertar import de typeorm si no existe
-                    if (!destinoContent.includes(inversaTypeormImports)) {
-                        destinoContent = destinoContent.replace(/import {([^}]*)} from 'typeorm';/, (match, p1) => {
-                            const imports = p1.split(',').map((i: string) => i.trim());
-                            const newImports = inversaTypeormImports.split(',').map((i: string) => i.trim());
-                            const allImports = Array.from(new Set([...imports, ...newImports]));
-                            return `import { ${allImports.join(', ')} } from 'typeorm';`;
-                        });
-                    }
-                    // Guardar archivo actualizado
-                    writeFileSync(destinoFilePath, destinoContent);
-                } catch (e) {
-                    // Si falla la actualización de la entidad destino, continuar
+                // F1-M5: las relaciones unitarias dueñas de FK van en el constructor
+                // (modelo menu-traduccion.entity.ts); las colecciones quedan fuera.
+                if (atributo.tipoRelacion === 'ManyToOne' || atributo.tipoRelacion === 'OneToOne') {
+                    constructorAttrs.push({
+                        param: `${atributo.nombreAtributo}${atributo.nulo === true ? '?' : ''}: ${atributo.rEntity}`,
+                        asignacion: `this.${atributo.nombreAtributo} = ${atributo.nombreAtributo};`,
+                        requerido: atributo.nulo !== true,
+                    });
                 }
+
+                // Inyección de la relación inversa en la entidad destino
+                const resultado = inyectarRelacionInversa(basePath, {
+                    tipoRelacion: atributo.tipoRelacion,
+                    nombreAtributo: atributo.nombreAtributo,
+                    entidadOrigen: className,
+                    entidadDestino: atributo.rEntity,
+                    coleccionInversa,
+                    nombreInversa,
+                    requerido: atributo.nulo !== true,
+                }, { esquema: esquemaEnum });
+                avisos.push(...resultado.avisos);
             } else {
                 // Generar columna normal
                 atributosCode.push(generarColumna(atributo, databaseType));
-                parametrosConstructor.push(`${atributo.nombreAtributo}: ${atributo.tipoDato}`);
-                thisAtributos.push(`this.${atributo.nombreAtributo} = ${atributo.nombreAtributo};`);
+                // El constructor replica la opcionalidad de la propiedad: el mapper
+                // pasa createXDto.<attr> (string | undefined si es nulable)
+                constructorAttrs.push({
+                    param: `${atributo.nombreAtributo}${atributo.nulo === true ? '?' : ''}: ${atributo.tipoDato}`,
+                    asignacion: `this.${atributo.nombreAtributo} = ${atributo.nombreAtributo};`,
+                    requerido: atributo.nulo !== true,
+                });
             }
         }
 
-        // Eliminar duplicados
-        typeormImports = [...new Set(typeormImports)];
-        importaciones = [...new Set(importaciones)];
-        
-        // Asegurar que no haya duplicados en el string final
-        const uniqueTypeormImports = typeormImports.filter((item, index) => typeormImports.indexOf(item) === index);
+        // TS1016: un parámetro requerido no puede ir detrás de uno opcional.
+        // El mapper (crear-mapper) usa el MISMO orden compartido.
+        const constructorOrdenado = ordenRequeridoPrimero(constructorAttrs, (a) => a.requerido);
+        const parametrosConstructor = constructorOrdenado.map((a) => a.param);
+        const thisAtributos = constructorOrdenado.map((a) => a.asignacion);
+
+        // Deduplicar imports typeorm
+        typeormExtras = typeormExtras.filter((item, index) => typeormExtras.indexOf(item) === index);
+
+        // F1-m1: índice único compuesto de clase si hay 2+ atributos únicos (estilo UQ_ de la api)
+        let indexDecorator = '';
+        const unicos = atributos.filter((a) => a.unico === true);
+        if (unicos.length >= 2) {
+            if (!typeormExtras.includes('Index')) typeormExtras.push('Index');
+            const nombreIndice = `UQ_${nombreTabla}_${unicos.map((u) => snakeDe(u.nombreAtributo)).join('_')}`;
+            const columnasIndice = unicos.map((u) => `'${u.nombreAtributo}'`).join(', ');
+            indexDecorator = `@Index('${nombreIndice}', [${columnasIndice}], { unique: true, where: '"activo" = true' })\n`;
+        }
+
+        const importList = ['Column', 'Entity', ...typeormExtras].join(', ');
 
         // Preparar el template
-        // El nombre de la clase y export SIEMPRE termina en Entity
-        const className = entityName.endsWith('Entity') ? entityName : entityName + 'Entity';
         let template = genericEntity;
-        // El template ya trae "Column, Entity" hardcodeados: solo pasamos los extras
-        const extras = uniqueTypeormImports.filter(i => i !== 'Column' && i !== 'Entity');
-        template = template.replace('$typeorm', extras.join(', '));
-        template = template.replace('$entidad', formatearNombre(eliminarSufijo(entityName, 'Entity'), '_'));
-        // Si la base de datos es postgres, usar schema, si no, quitarlo
-        let entityDecorator = '';
-        const esquemaEnum = (esquema || 'public').toString().toUpperCase();
-        if ((databaseType || '').toLowerCase() === 'postgresql' || (databaseType || '').toLowerCase() === 'postgres') {
-            entityDecorator = `@Entity('${formatearNombre(eliminarSufijo(entityName, 'Entity'), '_')}', { schema: SchemaEnum.${esquemaEnum} })`;
-        } else {
-            entityDecorator = `@Entity('${formatearNombre(eliminarSufijo(entityName, 'Entity'), '_')}')`;
-        }
-        template = template.replace('@Entity(\'$entidad\', { schema: SchemaEnum.$schema })', entityDecorator);
+        template = template.replace('$typeormImport', `import { ${importList} } from 'typeorm';`);
+        template = template.replace('$import', importaciones.length > 0 ? importaciones.join('\n') : '');
+        template = template.replace('$index', indexDecorator);
+        template = template.replace('$entidad', nombreTabla);
         template = template.replace('$schema', esquemaEnum);
+        template = template.replace('$nameEntity', className);
         template = template.replace('$atributos', atributosCode.join('\n\n    '));
         template = template.replace('$parametros', parametrosConstructor.join(', '));
         template = template.replace('$thisAtributos', thisAtributos.join('\n        '));
-        template = template.replace('$nameEntity', className);
-        template = template.replace('$import', importaciones.join('\n'));
+        template = template.replace('$toStringBody', generarToStringBody(atributos));
 
         // Crear directorio si no existe
-        const entityDir = path.join(basePath, 'src/persistence/entity');
         if (!existsSync(entityDir)) {
             mkdirSync(entityDir, { recursive: true });
         }
 
         // Escribir archivo de entidad
-        const fileName = `${formatearNombre(eliminarSufijo(entityName, 'Entity'), '-')}.entity.ts`;
-        const filePath = path.join(entityDir, fileName);
         writeFileSync(filePath, template);
 
-        // Actualizar index.ts si existe
-        const indexPath = path.join(entityDir, 'index.ts');
-        const exportStatement = `export {${className}} from './${formatearNombre(eliminarSufijo(entityName, 'Entity'), '-')}.entity';\n`;
-        
-        if (existsSync(indexPath)) {
-            const indexContent = readFileSync(indexPath, 'utf-8');
-            // Verificar si la entidad ya está exportada
-            if (!indexContent.includes(`export {${className}}`)) {
-                writeFileSync(indexPath, indexContent + exportStatement);
-            }
-        } else {
-            writeFileSync(indexPath, exportStatement);
-        }
+        // Registrar en index.ts y en el registro dinámico de persistence.service.ts
+        registrarEntidadEnIndex(entityDir, className, kebab);
+        registrarEntidadEnPersistence(path.join(basePath, 'src/persistence/persistence.service.ts'), className);
 
-        // --- ACTUALIZAR persistence.service.ts ---
-        const servicePath = path.join(basePath, 'src/persistence/persistence.service.ts');
-        if (existsSync(servicePath)) {
-            let serviceContent = readFileSync(servicePath, 'utf-8');
-            // 1. Agregar importación si no existe
-            const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/entity['"];?/;
-            if (importRegex.test(serviceContent)) {
-                serviceContent = serviceContent.replace(importRegex, (match, imports) => {
-                    // Limpiar comas y espacios duplicados
-                    let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
-                    if (!importList.includes(className)) importList.push(className);
-                    importList = Array.from(new Set(importList));
-                    return `import { ${importList.join(', ')} } from "./entity";`;
-                });
-            } else {
-                // Si no existe el import, agrégalo al principio
-                serviceContent = `import { ${className} } from "./entity";\n` + serviceContent;
-            }
-            // 2. Agregar al array 'entity' si no está
-            const entityArrayRegex = /export\s+const\s+entity\s*=\s*\[([^\]]*)\]/;
-            if (entityArrayRegex.test(serviceContent)) {
-                serviceContent = serviceContent.replace(entityArrayRegex, (match, entities) => {
-                    let entityList = entities.split(',').map((e: string) => e.trim()).filter(Boolean);
-                    if (!entityList.includes(className)) entityList.push(className);
-                    entityList = Array.from(new Set(entityList));
-                    return `export const entity = [${entityList.join(', ')}]`;
-                });
-            }
-            writeFileSync(servicePath, serviceContent);
-        }
-
-        return NextResponse.json({ 
-            success: true, 
-            message: `Entidad ${entityName} creada exitosamente`,
-            filePath: filePath
+        return NextResponse.json({
+            success: true,
+            message: `Entidad ${className} creada exitosamente`,
+            filePath: filePath,
+            avisos: avisos,
         });
 
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return NextResponse.json({ 
-            error: `Error al crear la entidad: ${message}` 
+        return NextResponse.json({
+            error: `Error al crear la entidad: ${message}`
         }, { status: 500 });
     }
-} 
+}

@@ -2,163 +2,56 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { formatearNombre, eliminarSufijo } from '@/utilities/entity-utils';
+import { parseEntityContent } from '@/utilities/entity-parser';
 
-// Función para parsear atributos de una entidad
-// El atributo es la línea que viene DESPUÉS del decorador @Column
+// Parser de atributos de una entidad — delega en el parser robusto compartido
+// (utilities/entity-parser, fuente única con crear-mapper/crear-repository).
+// El antiguo parser de regex por línea perdía los decoradores multi-línea
+// (el walk-up se cortaba en líneas como "nullable: false,") y con ellos las
+// RELACIONES, que quedaban tipadas como string en los DTOs.
 function parseEntityAttributes(content: string): any[] {
-    const atributos: any[] = [];
-    const lines = content.split("\n");
-    
-    // Primera pasada: identificar decoradores @Column y sus opciones
-    const columnOptionsMap = new Map<number, any>();
-    let i = 0;
-    while (i < lines.length) {
-        const line = lines[i].trim();
-        
-        // Detectar @Column con opciones en múltiples líneas
-        if (line.includes("@Column(") || line.includes("@PrimaryGeneratedColumn(") || line.includes("@PrimaryColumn(")) {
-            const startLine = i;
-            let endLine = i;
-            let braceDepth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
-            
-            // Buscar dónde cierra la llave
-            while (i < lines.length && braceDepth > 0) {
-                i++;
-                if (i < lines.length) {
-                    const currentLine = lines[i].trim();
-                    braceDepth += (currentLine.match(/\{/g) || []).length;
-                    braceDepth -= (currentLine.match(/\}/g) || []).length;
-                    endLine = i;
-                }
+    const info = parseEntityContent(content);
+    if (!info) return [];
+    // OneToMany se excluye (colección sin FK propia, no entra en los DTOs CRUD),
+    // misma convención que el parser anterior.
+    return info.atributos
+        .filter((a) => !(a.tipo === 'relacion' && a.tipoRelacion === 'OneToMany'))
+        .map((a) => {
+            if (a.tipo === 'columna') {
+                const atributo: any = {
+                    nombreAtributo: a.nombre,
+                    tipoDato: normalizarTipoTs(a.tipoTs),
+                    nulo: a.opcional,
+                    unico: a.esUnica,
+                };
+                if (a.length) atributo.length = a.length;
+                if (a.esInteger) atributo.integer = true;
+                return atributo;
             }
-            
-            // Parsear las opciones del decorador
-            const decoratorContent = lines.slice(startLine, endLine + 1).join(" ");
-            const optionsMatch = decoratorContent.match(/@\w+\(\{([^}]*)\}/);
-            if (optionsMatch && optionsMatch[1]) {
-                columnOptionsMap.set(startLine, parseObjectOptions("{" + optionsMatch[1] + "}"));
-            }
-        }
-        i++;
-    }
-    
-    // Segunda pasada: encontrar propiedades reales (que vienen DESPUÉS de un decorador)
-    // Una propiedad tiene el formato: nombre!: tipo; o nombre: tipo; o nombre?: tipo;
-    // También acepta la unión con null usada por el TS estricto: nombre?: tipo | null;
-    const propertyRegex = /^(\w+)([!]+)?(?:\?)?\s*:\s*(\w+(?:\[\])?(?:\s*\|\s*null)?)\s*;?$/;
-    
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-        const line = lines[lineIndex].trim();
-        const match = line.match(propertyRegex);
-        
-        if (match) {
-            const [, propertyName, , propertyType] = match;
-            
-            // Buscar hacia arriba el decorador más cercano
-            let decoratorOptions: any = {};
-            let decoratorType = '';
-            
-            for (let j = lineIndex - 1; j >= 0; j--) {
-                const prevLine = lines[j].trim();
-                
-                // Si encontramos un @ en una línea anterior
-                if (prevLine.startsWith("@")) {
-                    if (prevLine.includes("@Column") || prevLine.includes("@PrimaryGeneratedColumn") || prevLine.includes("@PrimaryColumn")) {
-                        decoratorOptions = columnOptionsMap.get(j) || {};
-                        decoratorType = 'Column';
-                        break;
-                    } else if (prevLine.includes("@OneToOne")) {
-                        decoratorType = 'OneToOne';
-                        break;
-                    } else if (prevLine.includes("@OneToMany")) {
-                        decoratorType = 'OneToMany';
-                        break;
-                    } else if (prevLine.includes("@ManyToOne")) {
-                        decoratorType = 'ManyToOne';
-                        break;
-                    } else if (prevLine.includes("@ManyToMany")) {
-                        decoratorType = 'ManyToMany';
-                        break;
-                    }
-                    // JoinColumn/JoinTable/Index/etc.: seguir subiendo hasta el decorador de relación
-                    continue;
-                }
-                // Si encontramos otra propiedad, no hay decorador para esta
-                if (prevLine.match(/^\w+:/)) {
-                    break;
-                }
-            }
-            
-            // Determinar si es nulo o no
-            const isOptional = line.includes('?') || (decoratorOptions && decoratorOptions.nullable === true);
-            
-            // Ignorar solo OneToMany (colecciones) - ManyToMany sí hace falta
-            if (decoratorType === 'OneToMany') {
-                continue;
-            }
-            
-            const atributo: any = {
-                nombreAtributo: propertyName,
-                tipoDato: mapTypeScriptType(propertyType.replace(/\[\]/, '')),
-                nulo: isOptional,
-                unico: decoratorOptions.unique ?? false,
+            return {
+                nombreAtributo: a.nombre,
+                tipoDato: 'relation',
+                nulo: a.opcional,
+                rEntity: a.destino,
+                tipoRelacion: a.tipoRelacion,
             };
-            
-            if (decoratorOptions.length) {
-                atributo.length = decoratorOptions.length;
-            }
-            if (decoratorOptions.type === 'int' || decoratorOptions.type === 'integer') {
-                atributo.integer = true;
-            }
-            
-            // Manejar relaciones (OneToOne, ManyToOne, ManyToMany)
-            if (decoratorType === 'OneToOne' || decoratorType === 'ManyToOne' || decoratorType === 'ManyToMany') {
-                atributo.tipoDato = 'relation';
-                atributo.rEntity = propertyType.replace(/\[\]/, '');
-                atributo.tipoRelacion = decoratorType;
-            }
-            
-            atributos.push(atributo);
-        }
-    }
-    
-    return atributos;
-  }
+        });
+}
 
-  function parseObjectOptions(optionsStr: string): any {
-    const options: any = {};
-    const content = optionsStr.slice(1, -1).trim();
-    const pairs = content.split(",").map(p => p.trim());
-    for (const pair of pairs) {
-      const [key, ...valueParts] = pair.split(":").map(p => p.trim());
-      const valueStr = valueParts.join(":").trim();
-      if (key && valueStr) {
-        if (valueStr === "true") options[key] = true;
-        else if (valueStr === "false") options[key] = false;
-        else if (/^\d+$/.test(valueStr)) options[key] = parseInt(valueStr);
-        else if (valueStr.startsWith("'") || valueStr.startsWith('"')) {
-          options[key] = valueStr.slice(1, -1);
-        } else {
-          options[key] = valueStr;
-        }
-      }
-    }
-    return options;
-  }
-  
-  function mapTypeScriptType(tsType: string): string {
-    // Normalizar la unión "T | null" (TS estricto) al tipo base
-    const base = tsType.split('|')[0].trim();
+// Normaliza el tipo TS capturado por el parser a los tokens que espera la
+// generación de DTOs (misma tabla que mapTypeScriptType).
+function normalizarTipoTs(tipoTs: string): string {
+    const base = tipoTs.split('|')[0].trim();
     const typeMap: { [key: string]: string } = {
-      "string": "string",
-      "number": "number",
-      "boolean": "boolean",
-      "Date": "Date",
-      "Timestamp": "Timestamp",
-      "Geometry": "Geometry",
+        'string': 'string',
+        'number': 'number',
+        'boolean': 'boolean',
+        'Date': 'Date',
+        'Timestamp': 'Timestamp',
+        'Geometry': 'Geometry',
     };
-    return typeMap[base] || "string";
-  }
+    return typeMap[base] || 'string';
+}
 
 // Templates para DTOs
 const dtoTemplate = `import {$validadores} from "class-validator";

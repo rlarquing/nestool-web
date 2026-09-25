@@ -332,6 +332,9 @@ function mapDtoType(tipo: string, relatedEntity?: string): string {
   }
 
 // Función para verificar si una entidad es un nomenclador
+// Fase 5: detección estructural real del modelo api-base — el marcador fiable es
+// `extends GenericNomencladorEntity` (independiente del schema; el grep del literal
+// MOD_NOMENCLATOR fallaba si la entity estaba en otro schema).
 function esNomenclador(basePath: string, entityName: string): boolean {
     try {
         const nameSinEntity = entityName.endsWith("Entity") ? entityName.replace("Entity", "") : entityName;
@@ -343,7 +346,7 @@ function esNomenclador(basePath: string, entityName: string): boolean {
         }
         
         const content = readFileSync(entityPath, 'utf-8');
-        return content.includes('SchemaEnum.MOD_NOMENCLATOR');
+        return content.includes('extends GenericNomencladorEntity') || content.includes('SchemaEnum.MOD_NOMENCLATOR');
     } catch {
         return false;
     }
@@ -463,7 +466,10 @@ export async function POST(req: NextRequest) {
             // Generar código para cada tipo de atributo
             const codigoAtributos = generateCrudAttributes(entityAtributos, basePath);
             
-            const nombre = eliminarSufijo(dtoName, 'Dto');
+            // F5-C5: los llamadores reales pasan 'MarcaEntity' → doble eliminarSufijo.
+            // Sin el segundo, se generaba CreateMarcaEntityDto contra la convención de
+            // la api y DESALINEADO con controller/service (que derivan CreateMarcaDto).
+            const nombre = eliminarSufijo(eliminarSufijo(dtoName, 'Dto'), 'Entity');
 
             // 1. CREATE DTO
             let createDtoCode = createDtoTemplate
@@ -528,28 +534,37 @@ export async function POST(req: NextRequest) {
 
             // 4. READ DTO
             const readAttributes = codigoAtributos.read;
-            const readDtoCode = readDtoTemplate
-                .replace('$swagger', 'ApiProperty')
-                .replace('$name', nombre)
-                .replace('$atributos', readAttributes)
-                .replace('$parametros', codigoAtributos.parametros)
-                .replace('$thisAtributos', codigoAtributos.thisAtributos);
             
-            let readFinalCode = readDtoCode;
             if (esNomenclador) {
-                readFinalCode = readDtoCode
-                    .replace('$padre', 'extends ReadNomencladorDto')
-                    .replace('$import', "import { ReadNomencladorDto } from './read-nomenclador.dto';")
-                    .replace('$super', 'super(id, nombre, descripcion, dtoToString);');
+                // F5-C6: el read del nomenclador es SOLO HERENCIA. El template canónico
+                // re-declaraba dtoToString/id sin inicializador (TS2564) e inyectaba
+                // super(id, nombre, descripcion, dtoToString) con variables inexistentes
+                // (TS2304). ReadNomencladorDto ya aporta id/nombre/descripcion/dtoToString
+                // y su constructor: solo se hereda, con los atributos EXTRA (si los
+                // hubiera) como declaraciones opcionales — import ApiProperty solo si
+                // queda algo que decorar.
+                const atributosExtra = readAttributes.trim();
+                const apiPropertyImport = atributosExtra ? 'import {ApiProperty} from "@nestjs/swagger";\n' : '';
+                const cuerpo = atributosExtra ? `\n    ${atributosExtra}\n` : '';
+                const readFinalNomenclador = `${apiPropertyImport}import { ReadNomencladorDto } from './read-nomenclador.dto';\n\nexport class Read${nombre}Dto extends ReadNomencladorDto {${cuerpo}}\n`;
+                const readFilePathNom = path.join(dtoDir, `read-${formatearNombre(nombre, '-')}.dto.ts`);
+                writeFileSync(readFilePathNom, readFinalNomenclador);
             } else {
-                readFinalCode = readDtoCode
+                const readDtoCode = readDtoTemplate
+                    .replace('$swagger', 'ApiProperty')
+                    .replace('$name', nombre)
+                    .replace('$atributos', readAttributes)
+                    .replace('$parametros', codigoAtributos.parametros)
+                    .replace('$thisAtributos', codigoAtributos.thisAtributos);
+                
+                const readFinalCode = readDtoCode
                     .replace('$padre', '')
                     .replace('$import', '')
                     .replace('$super', 'this.dtoToString = dtoToString; this.id = id;');
+                
+                const readFilePath = path.join(dtoDir, `read-${formatearNombre(nombre, '-')}.dto.ts`);
+                writeFileSync(readFilePath, readFinalCode);
             }
-
-            const readFilePath = path.join(dtoDir, `read-${formatearNombre(nombre, '-')}.dto.ts`);
-            writeFileSync(readFilePath, readFinalCode);
 
             // Actualizar index.ts
             const indexPath = path.join(dtoDir, 'index.ts');

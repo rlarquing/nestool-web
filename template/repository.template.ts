@@ -23,6 +23,38 @@ export class $nameRepository extends GenericRepository<$nameEntity> implements I
 }`;
 
 /**
+ * Repository CONCRETO de un nomenclador (F3-C1/C2 — modelo refinado contra la api real).
+ * El mapa `repositories` de GenericNomencladorRepository es POR INSTANCIA (protected) y
+ * la ÚNICA instancia consultada en runtime es la que GenericNomencladorService inyecta
+ * por token de clase. Por eso el concreto NO extiende la base (crearía su propia
+ * instancia con el mapa vacío y el CRUD genérico seguiría con 404): implementa
+ * OnModuleInit y registra SU Repository<X> en la instancia COMPARTIDA del genérico
+ * (DI por token de clase ⇒ mismo singleton que usa el service). El acceso bracket a
+ * `['registerRepository']` es deliberado: el método es protected en la base.
+ * CONTRATO: $registro == valor de NomencladorTypeEnum == :name del controller
+ * (main.ts itera el enum y crea el menú con esos valores).
+ */
+export const repositoryNomencladorTemplate = `import { Injectable, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { $nameEntity } from '../entity';
+import { GenericNomencladorRepository } from './generic-nomenclador.repository';
+
+@Injectable()
+export class $nameRepository implements OnModuleInit {
+    constructor(
+        @InjectRepository($nameEntity)
+        private $paramRepository: Repository<$nameEntity>,
+        private genericNomencladorRepository: GenericNomencladorRepository,
+    ) {}
+
+    onModuleInit(): void {
+        this.genericNomencladorRepository['registerRepository']('$registro', this.$paramRepository);
+    }
+}
+`;
+
+/**
  * Repository para entidades CON relaciones unitarias (ManyToOne/OneToOne).
  * La ruta provee: $entidadesImport, $inyeccionesAuxiliares, $relations y $helpers.
  */

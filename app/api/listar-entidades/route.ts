@@ -12,9 +12,17 @@ function toKebabCase(str: string): string {
 
 // Función para detectar si una entidad es un nomenclador
 function esNomenclador(content: string, className: string): boolean {
-  // Ignorar clases abstractas o base
-  if (className === 'NomencladorEntity' || className === 'BaseEntity') {
+  // Ignorar clases abstractas o base (nombres reales del modelo api-base)
+  if (className === 'GenericNomencladorEntity' || className === 'GenericEntity' ||
+      className === 'NomencladorEntity' || className === 'BaseEntity') {
     return false;
+  }
+
+  // Fase 5: marcador estructural REAL (3er punto de la cadena de detección,
+  // junto a crear-dto/obtener-atributos). Las heurísticas de campos no veían
+  // una entity nomencladora SIN atributos (cuerpo vacío, hereda nombre/descripcion).
+  if (content.includes('extends GenericNomencladorEntity') || content.includes('SchemaEnum.MOD_NOMENCLATOR')) {
+    return true;
   }
 
   // Verificar si extiende de NomencladorEntity
@@ -88,8 +96,9 @@ export async function POST(req: NextRequest) {
       for (const match of matches) {
         const className = match[1];
         
-        // Ignorar clases abstractas o de utilidad
-        if (className === 'BaseEntity' || className === 'NomencladorEntity' || 
+        // Ignorar clases abstractas o de utilidad (bases reales del modelo api-base)
+        if (className === 'GenericEntity' || className === 'GenericNomencladorEntity' ||
+            className === 'BaseEntity' || className === 'NomencladorEntity' || 
             className.startsWith('Abstract') || className.endsWith('Interface')) {
           continue;
         }

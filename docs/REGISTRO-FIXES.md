@@ -144,27 +144,28 @@
 
 ## Función 3 — Crear nomenclador (`/api/crear-nomenclador`)
 
-**Veredicto: NO CUMPLE (nomenclador inerte).** Entity y enum bien; wiring de repository incompatible con la api.
+**Veredicto original: NO CUMPLE (nomenclador inerte).** Entity y enum bien; wiring de repository incompatible con la api. → **CORREGIDO (fase 5, ver Lote 5)**.
 
 ### F3-C1 — 🔴 Inyecta `@InjectRepository` en el repository GENÉRICO (clase plana no-@Injectable)
 - **Fichero**: bloque "ACTUALIZAR generic-nomenclador.repository.ts".
 - **Problema**: (1) no importa `InjectRepository` → no compila; (2) `GenericNomencladorRepository` en la api es una clase plana con mapa dinámico, no un provider con DI; (3) rompería los `super()` de los concretos futuros.
 - **Modelo api-base**: repository **concreto** que extiende `GenericNomencladorRepository`, inyecta su `@InjectRepository(X)` y se registra con `registerRepository(name, repo)`; se da de alta en `export const repository` de `persistence.service.ts`.
 - **Fix propuesto**: eliminar el parche al genérico; generar `<nombre>.repository.ts` concreto (extiende la base, `super(); this.registerRepository('<nombre>', repo)`) + alta en `export const repository`.
-- **Estado**: ⬜ pendiente
+- **⚠️ REFINAMIENTO del modelo (hallazgo de la fase 5)**: el mapa `repositories` de `GenericNomencladorRepository` es **POR INSTANCIA** (`protected repositories = {}`) y la ÚNICA instancia consultada en runtime es la que `GenericNomencladorService` inyecta por token de clase. El fix propuesto original (concreto que **extiende** la base y se auto-registra) habría dejado ese mapa VACÍO → el CRUD genérico seguiría con 404. Modelo refinado: el concreto **NO extiende** la base; implementa `OnModuleInit` y registra su `Repository<X>` en la instancia **COMPARTIDA** (DI por token de clase ⇒ mismo singleton del service) vía `this.genericNomencladorRepository['registerRepository']('<nombre>', this.<x>Repository)` (acceso bracket deliberado: el método es protected).
+- ✅ **Estado**: CORREGIDO (fase 5). Parche destructivo eliminado; `repositoryNomencladorTemplate` genera el repo concreto con registro en la instancia compartida.
 
 ### F3-C2 — 🔴 Nomenclador inerte: nadie registra el repo en el mapa
 - **Problema**: sin repository concreto, `getRepository('<nombre>')` lanza `NotFoundException` en todo CRUD. El menú sí se crea (el `main.ts` itera `NomencladorTypeEnum`) → nacimiento a medias.
-- **Fix propuesto**: ver F3-C1.
-- **Estado**: ⬜ pendiente
+- **Fix aplicado (fase 5)**: repository concreto generado (ver F3-C1 refinado) + alta en `repository/index.ts` (con normalización de newline final) + import y array `export const repository` de `persistence.service.ts` (patrón F7) + entity en `export const entity` (helper compartido `registrarEntidadEnPersistence`). CONTRATO verificado contra main.ts/controller: valor del enum == nombre de registro == `:name` del controller.
+- ✅ **Estado**: CORREGIDO (fase 5). E2E: `EstadoCivilRepository.onModuleInit() → registerRepository('estadoCivil', ...)`, `ESTADOCIVIL = 'estadoCivil'` en el enum.
 
 ### F3-C3 — 🟡→🔴 Schema por defecto `public` rompe la cadena de detección
 - **Problema**: el template deja `SchemaEnum.$schema` con fallback `'public'`; si el usuario no elige `MOD_NOMENCLATOR`, la entity no contiene el literal que `esNomenclador()` (crear-dto) grepea → el generador de DTOs deja de tratarla como nomencladora silenciosamente.
-- **Fix propuesto**: fijar/por defecto `MOD_NOMENCLATOR` en la creación de nomencladores (la UI puede ofrecer cambiarlo, pero el default del dominio es ese).
-- **Estado**: ⬜ pendiente
+- **Fix aplicado (fase 5)**: default `MOD_NOMENCLATOR` (uppercase, patrón F1-C6). Además la detección ya no depende del schema: `esNomenclador()` reconoce el marcador estructural `extends GenericNomencladorEntity` (crear-dto y listar-entidades, 2º y 3er punto de la cadena).
+- ✅ **Estado**: CORREGIDO (fase 5).
 
 ### F3-m1 — 🟢 Tabla con prefijo `nom_` sin anclaje en la api; sin orderBy
-- **Estado**: ⬜ pendiente (decidir convención con el propietario)
+- **Estado**: ⬜ pendiente (decisión del propietario; el template ya emite `nom_` de fábrica — si se decide quitar, es un cambio de una línea en `entity.template.ts`).
 
 ### ✅ Cumple
 Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` · entrada en `NomencladorTypeEnum` (regex válida para el fichero real; `main.ts` la consume).
@@ -229,6 +230,18 @@ Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según 
 - **Problema**: el walk-up de decoradores se cortaba en las líneas de continuación multi-línea (p. ej. `nullable: false,` matcheaba el guard "otra propiedad" → break) → las relaciones M:1/M:N caían como `tipoDato: string` (fallback de mapTypeScriptType) → los DTOs generaban `prioridad?: string` / `etiquetas?: string` en lugar de `number`/`number[]`. Es la causa de fondo del parche de F5-C3: el regex línea a línea no escala.
 - **Fix aplicado (fase 3)**: `parseEntityAttributes` delega en el parser robusto compartido `parseEntityContent` (utilities/entity-parser.ts) — el mismo que usan crear-mapper y crear-repository. OneToMany sigue excluido de los DTOs (convención previa). Extra: captura `length` y `type: 'int'` de los @Column multi-línea.
 - ✅ **Estado**: CORREGIDO (fase 3). Verificado E2E: ReadTareaDto ahora declara `prioridad?: number, etiquetas?: number[]`.
+
+### F5-C5 — 🔴→✅ El naming de DTOs CRUD no quitaba el sufijo `Entity` (nuevo, detectado en la fase 5)
+- **Fichero**: `app/api/crear-dto/route.ts` (modo crud).
+- **Problema**: los llamadores reales pasan `MarcaEntity` (no `MarcaDto`); el nombre de clase se derivaba con un solo `eliminarSufijo(dtoName, 'Dto')` → se generaban `CreateMarcaEntityDto` / `create-marca-entity.dto.ts` contra la convención de la api Y DESALINEADO con controller/service, que derivan `CreateMarcaDto` → mismatch latente de la cadena completa.
+- **Fix aplicado (fase 5)**: doble eliminarSufijo `eliminarSufijo(eliminarSufijo(dtoName, 'Dto'), 'Entity')`. NOTA de migración: proyectos generados antes pueden tener entradas rancias `*-entity.dto` en `shared/dto/index.ts`.
+- ✅ **Estado**: CORREGIDO (fase 5). E2E: `dtoName: 'MarcaEntity'` → `create-marca.dto.ts` con `export class CreateMarcaDto`, y el controller generado importa exactamente `CreateMarcaDto`.
+
+### F5-C6 — 🔴→✅ El Read DTO de un nomenclador NO compilaba (nuevo, detectado en la fase 5)
+- **Fichero**: `app/api/crear-dto/route.ts` (modo crud, rama esNomenclador del read).
+- **Problema**: el template canónico emite constructor `(dtoToString, id)` + re-declaración de `dtoToString`/`id` sin inicializador; la rama nomenclador inyectaba `super(id, nombre, descripcion, dtoToString)` con variables INEXISTENTES (TS2304) y las re-declaraciones caían en TS2564 (strict).
+- **Fix aplicado (fase 5)**: el read del nomenclador es SOLO HERENCIA — `export class Read<X>Dto extends ReadNomencladorDto {}` (la base ya aporta id/nombre/descripcion/dtoToString y su constructor). Sin constructor, sin re-declaraciones; import ApiProperty solo si la entity tuviera atributos extra que decorar.
+- ✅ **Estado**: CORREGIDO (fase 5). E2E: `read-estado-civil.dto.ts` heredado limpio; tsc 0 errores.
 
 ## Función 6 — Crear mapper (`/api/crear-mapper`)
 
@@ -407,18 +420,18 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 
 | # | Función | Veredicto |
 |---|---|---|
-| 1 | Nueva entity | ❌ NO CUMPLE |
-| 2 | Editar entity | ❌ NO CUMPLE (la más destructiva) |
-| 3 | Crear nomenclador | ❌ NO CUMPLE (nomenclador inerte) |
-| 4 | Nuevo DTO | ❌ NO CUMPLE (evidencia E2E 🧪) |
-| 5 | DTOs CRUD | ❌ NO CUMPLE (evidencia E2E 🧪) |
-| 6 | Crear mapper | ❌ NO CUMPLE (con relaciones) |
-| 7 | Crear repository | ❌ NO CUMPLE (exports/registro) |
-| 8 | Crear service | ❌ NO CUMPLE (registro) |
-| 9 | Crear controller | ❌ NO CUMPLE (no compila) |
-| 10 | CRUD completo | ❌ NO CUMPLE (orquesta los 9 anteriores) |
+| 1 | Nueva entity | ✅ CORREGIDA (lotes 1 y 3) |
+| 2 | Editar entity | ✅ CORREGIDA (lote 4 — edición quirúrgica) |
+| 3 | Crear nomenclador | ✅ CORREGIDA (lote 5 — nomenclador vivo) |
+| 4 | Nuevo DTO | ✅ CORREGIDA (lote 2) |
+| 5 | DTOs CRUD | ✅ CORREGIDA (lotes 2/3/5; quedan m1/m2 menores) |
+| 6 | Crear mapper | ✅ CORREGIDA (lotes 3 y 4) |
+| 7 | Crear repository | ✅ CORREGIDA (lotes 1 y 3) |
+| 8 | Crear service | ✅ CORREGIDA (lote 1; queda M1 menor) |
+| 9 | Crear controller | ✅ CORREGIDA (lote 1; quedan M1/M2) |
+| 10 | CRUD completo | ⚠️ PARCIAL (quedan C1/C2/M1: tsc real, atomicidad, honestidad) |
 
-**10/10 funciones NO CUMPLEN.** Prioridad de fix sugerida: F9-C1/C2 y F8-C1 (baratos y bloquean todo) → F7-C1/C2 → F6-C1/C3 → F5-C1/C2 y F4-C1 → F1-C1..C5 → F2 (replantear como edición quirúrgica) → F3 (repository concreto nomenclador) → F10 (verificación post-generación).
+**9/10 funciones corregidas y verificadas E2E; F10 parcial.** Pendiente: F9-M1/M2 + F10-M2 (ListadoDto header==key, seed Funcion/endPoint contra el 403), F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad), F8-M1; decisiones F5-M2/F3-m1.
 
 ## Decisiones pendientes del propietario
 
@@ -500,3 +513,24 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   10. **Cadena completa** sobre la entity editada (DTOs CRUD + mapper + repository + service + controller) → `tsc --noEmit` final: **0 errores nuevos en `src/`** (24/24 preexistentes).
 - **Hallazgos de la fase (corregidos en el mismo lote)**: guard de constructor-en-una-línea capturaba el caso normal `constructor(...) {` con cuerpo multi-línea; `)` de cierre perdido al reconstruir params en línea; params no removidos por anclaje `^` en líneas (pasó a cirugía por TEXTO); asignaciones con indent fija 8 espacios (ahora heredada).
 - **Pendiente siguiente**: F3 (repository concreto de nomenclador + MOD_NOMENCLATOR por defecto), F9-M1/M2 + F10-M2 (ListadoDto header==key, seed Funcion/endPoint contra el 403), F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad), F8-M1, decisiones F5-M2/F3-m1.
+
+---
+
+### Lote 5 (crear-nomenclador vivo) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F3-C1, F3-C2, F3-C3 + **F5-C5** y **F5-C6** (nuevos, ver sus secciones).
+- **Historia**: este lote se completó una primera vez (commit local `4b258de`) pero el push falló por falta de credenciales y el reset del sandbox lo destruyó. Rehecho íntegramente desde la documentación del worklog (Task 19 → Task 20).
+- **Hallazgo crítico del modelo real**: el mapa `repositories` de `GenericNomencladorRepository` es POR INSTANCIA y el único consultado en runtime es el de la instancia que `GenericNomencladorService` inyecta por token de clase → el concreto se registra en la instancia COMPARTIDA (OnModuleInit + acceso bracket al método protected). Documentado como refinamiento en F3-C1.
+- **Cambios**:
+  - `template/repository.template.ts`: nuevo `repositoryNomencladorTemplate` (repo concreto @Injectable implements OnModuleInit; CONTRATO: `$registro` == valor del NomencladorTypeEnum == `:name` del controller).
+  - `app/api/crear-nomenclador/route.ts` reescrito en su tramo de wiring: eliminado el parche destructivo al genérico (F3-C1); genera repo concreto + alta en `repository/index.ts` (normalización de newline final) + import/array `export const repository` y `export const entity` de `persistence.service.ts` (patrón F7); schema default `MOD_NOMENCLATOR` uppercase (F3-C3, patrón F1-C6); pre-check 409 de entity Y repository ANTES de escribir nada; respuesta honesta con `registro` (qué quedó registrado y cómo) + `avisos`.
+  - `app/api/crear-dto/route.ts`: `esNomenclador()` reconoce `extends GenericNomencladorEntity` (marcador estructural, independiente del schema); doble eliminarSufijo (F5-C5); read nomenclador solo herencia (F5-C6).
+  - `app/api/listar-entidades/route.ts`: exclusión del dropdown reconoce el marcador estructural (3er punto de la cadena); ignore-list con las bases reales `GenericEntity`/`GenericNomencladorEntity`.
+- **Verificación E2E** (dos copias limpias de api-base + `bun install`; baseline `tsc --noEmit` = 24 errores preexistentes solo en `test/`):
+  - **A**: `EstadoCivil` → entity con `SchemaEnum.MOD_NOMENCLATOR` + tabla `nom_estado_civil`; repo concreto con registro en la instancia compartida; `repository/index.ts` y AMBOS arrays de `persistence.service.ts` actualizados; `ESTADOCIVIL = 'estadoCivil'` en el enum (contrato enum==registro==URL).
+  - **B**: DTOs CRUD del nomenclador: 4 ficheros extendiendo los 4 `*NomencladorDto` de la api; read heredado limpio (`extends ReadNomencladorDto {}`).
+  - **C**: 409 en duplicado de entity y de repository huérfano (pre-check de atomicidad).
+  - **D**: cadena CRUD completa de `MarcaEntity` (con sufijo, camino riesgoso de F5-C5) vía `crear-crud-completo` + `crear-entidad`: 5/5 componentes OK, `create-marca.dto.ts` ↔ `CreateMarcaDto` ↔ import del controller consistentes.
+  - **E**: `listar-entidades` con `excluirNomencladores` excluye `EstadoCivilEntity`; sin exclusión la lista; `GenericEntity`/`GenericNomencladorEntity` jamás listadas.
+  - **F**: `tsc --noEmit` final en ambas copias: **0 errores nuevos en `src/`** (24/24 preexistentes). `tsc` de nestool-web: 0 errores.
+- **Nota de operación**: si se editan templates con el dev server arriba, turbopack puede servir el template rancio → reiniciar el server (re-verificado en este lote).
+- **Pendiente siguiente**: F9-M1 (ListadoDto header==key), F9-M2/F10-M2 (seed Funcion/endPoint → 403 del PermissionGuard), F10-C1/C2/M1 (validación post-generación, atomicidad, honestidad del success), F8-M1; decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).

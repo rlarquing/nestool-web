@@ -18,12 +18,32 @@ interface CrudResults {
     repository?: CrudResultItem;
     service?: CrudResultItem;
     controller?: CrudResultItem;
+    seed?: CrudResultItem;
+}
+
+interface Verificacion {
+    modo: 'tsc' | 'transpile' | 'ninguna';
+    registros: { persistence: boolean; core: boolean; api: boolean };
+    erroresTocados: string[];
+    preexistentesSrc: number;
+    preexistentesOtro: number;
+    avisos: string[];
+}
+
+interface RollbackInfo {
+    ejecutado: boolean;
+    restaurados: string[];
+    eliminados: string[];
+    errores?: string[];
+    motivo?: string;
 }
 
 interface CrearCrudCompletoResult {
     success: boolean;
     message: string;
     results?: CrudResults;
+    verificacion?: Verificacion;
+    rollback?: RollbackInfo;
     error?: string;
 }
 

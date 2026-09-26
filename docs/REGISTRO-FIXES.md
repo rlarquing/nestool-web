@@ -386,17 +386,17 @@ Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `P
 ### F10-C1 — 🔴 Reporta `success: true` (200) aunque la api quede sin compilar
 - **Problema**: cada sub-ruta solo valida la ESCRITURA de ficheros; no hay verificación posterior (parseo TS, `tsc --noEmit`). Con F5/F6/F7/F8/F9 activos, un flujo "exitoso" entrega una api que no compila ni arranca, y el usuario ve "CRUD completo creado exitosamente".
 - **Fix propuesto**: tras generar, validar (parsear los ficheros tocados como mínimo; ideal `tsc --noEmit`) y reportar el estado REAL; fallar si algo no parsea.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 7). El orquestador ejecuta el `tsc --noEmit` del PROPIO proyecto destino (`node_modules/.bin/tsc`, cwd=basePath) y clasifica: errores en ficheros tocados → FALLO+rollback; errores preexistentes en src/ → FALLO+rollback con mensaje que lo aclara; errores en test/otros → ignorados (baseline). Si tsc no está disponible: fallback transpile (sintáctico por fichero tocado) con `verificacion.modo` honesto. ADEMÁS verifica los 3 registros dinámicos (símbolos presentes en persistence/core/api service). HALLAZGO documentado: un error SINTÁCTICO en un fichero del programa suprime los type-errors del resto de la salida de tsc (el baseline 24 de test/ desaparece al romper una entity) — sin riesgo fail-open: el fichero roto siempre reporta SU error y si es tocado → rollback.
 
 ### F10-C2 — 🔴 Hereda TODOS los defectos de las funciones 4–9 (no tiene solución propia)
 - **Problema**: el valor del botón es ensamblar la cadena entity→controller; hoy la cadena NO se ensambla: repo provisto pero no exportado (F7-C1), service sin registrar (F8-C1), mapper sin registrar (F8-C2), controller con `$import` y registro roto (F9-C1/C2/C3).
 - **Fix propuesto**: dependencia dura de los fixes 4–9 + test E2E "la api generada compila".
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 7). La cadena 4–9 ensamblada y verificada E2E en los lotes 1–6; el orquestador ahora INSTITUCIONALIZA el test: verificación de los 3 registros dinámicos + `tsc --noEmit` real del proyecto destino tras cada generación (y rollback si no compila). El "la api generada compila" ya no es una propiedad puntual de un E2E: es una comprobación permanente del orquestador.
 
 ### F10-M1 — 🟡 Sin atomicidad ni cleanup; `someSuccess` devuelve `success: true` con mensaje ambiguo
 - **Problema**: si un paso falla (409/500), los ficheros previos quedan; la respuesta 200 "parcial" se presta a confusión.
 - **Fix propuesto**: modo all-or-nothing (rollback de lo creado) o reporte estructurado claro con acción por paso.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 7). PRE-FLIGHT: entity requerida (400 si falta), 409 temprano con la LISTA de artefactos ya presentes y sin escribir nada; snapshot de los 9 ficheros compartidos (dto/index, mapper/index, core.service, repository/index, persistence.service, service/index, controller/index, api.service, main.ts) con 400 claro si alguno es ilegible; pasos fail-fast; ROLLBACK all-or-nothing (restaura snapshots, borra artefactos creados) ante fallo de paso, registros incompletos o verificación fallida — rollback resiliente (errores por fichero reportados, no aborta); `someSuccess → success:true` ELIMINADO: success solo si 6/6 pasos + registros + verificación; el reporte por paso viaja siempre.
 
 ### F10-M2 — 🟡 No genera seed de funciones/endPoints (ver F9-M2) → "CRUD completo" termina en 403
 - ✅ **Estado**: CORREGIDO (lote 6). Paso 6 del orquestador: llama `/api/crear-seed` y reporta su resultado en `results.seed`; el mensaje de éxito avisa "reinicie la api para sembrar". Contenido del seed: ver F9-M2.
@@ -429,9 +429,9 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 7 | Crear repository | ✅ CORREGIDA (lotes 1 y 3) |
 | 8 | Crear service | ✅ CORREGIDA (lote 1; queda M1 menor) |
 | 9 | Crear controller | ✅ CORREGIDA (lotes 1 y 6; queda m1 menor) |
-| 10 | CRUD completo | ⚠️ PARCIAL (quedan C1/C2/M1: tsc real, atomicidad, honestidad) |
+| 10 | CRUD completo | ✅ CORREGIDA (lotes 6 y 7; quedan m1 menores) |
 
-**9/10 funciones corregidas y verificadas E2E; F10 parcial.** Pendiente: F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad, honestidad del success), F8-M1, F9-m1; decisiones F5-M2/F3-m1.
+**10/10 funciones corregidas y verificadas E2E.** Pendientes menores: F8-M1 (registros con parser TS), F9-m1, F10-m1 (self-fetch → llamadas directas); decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).
 
 ## Decisiones pendientes del propietario
 
@@ -554,3 +554,24 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - **G**: registros dinámicos íntegros (Marca presente en persistence.service.ts, core.service.ts, api.service.ts).
 - **Nota**: el seed se ejecuta en el arranque dev de la api (misma política que el resto de la siembra de `sembrarDatosDesarrollo`); en producción la siembra sigue siendo manual por diseño de la api.
 - **Pendiente siguiente**: F10-C1/C2/M1 (verificación post-generación con tsc real, atomicidad/cleanup, honestidad del success), F8-M1, F9-m1, F10-m1; decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).
+
+---
+
+### Lote 7 (orquestador honesto y atómico) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F10-C1, F10-C2, F10-M1.
+- **Cambios**: `app/api/crear-crud-completo/route.ts` reescrito de cero:
+  - **PRE-FLIGHT (M1)**: entity requerida (400 si falta, con ruta exacta); 409 temprano con la LISTA de artefactos presentes (9 rutas conocidas: 4 DTOs, mapper, repository, service, controller, seed) SIN escribir nada; snapshot de los 9 ficheros compartidos con 400 claro si alguno es ilegible (hallado en E2E: EACCES antes daba 500 genérico).
+  - **PASOS (M1)**: los 6 fetches fail-fast; sin `someSuccess → success:true`.
+  - **ROLLBACK (M1)**: all-or-nothing ante fallo de paso / registros incompletos / verificación fallida — restaura snapshots, borra artefactos creados, resiliente por fichero (errores reportados, no aborta).
+  - **VERIFICACIÓN (C1/C2)**: (a) registros dinámicos: entity+repo en persistence.service, service+mapper en core.service, controller en api.service; (b) `tsc --noEmit` REAL del proyecto destino (`node_modules/.bin/tsc`, cwd=basePath, timeout 180s) con clasificación de errores: tocados→FALLO+rollback; preexistentes src/→FALLO+rollback con mensaje aclaratorio; test/otros→ignorados (baseline). Fallback: transpile sintáctico por fichero tocado con `verificacion.modo='transpile'` + aviso. Respuesta con `verificacion` completa y `rollback` informativo.
+  - `hooks/useCrearCrudCompleto.ts`: interfaces extendidas (seed, verificacion, rollback) — aditivo, la UI no se rompe.
+- **Verificación E2E** (copia limpia api-base + `bun install`):
+  - **Happy path**: MarcaEntity → CRUD completo → 6/6 pasos, `verificacion={modo:'tsc', registros:{persistence,core,api}:true, erroresTocados:[], preexistentesSrc:0, preexistentesOtro:24}`, rollback inactivo, mensaje "verificado con tsc --noEmit (0 errores en src/)".
+  - **Pre-flight 409**: re-run → 409 con la lista de los 9 artefactos presentes; nada escrito.
+  - **Rollback por paso (B')**: `api.service.ts` read-only (444) → pasos dto/mapper/repository/service OK, controller falla → rollback ejecutado: 8 restaurados + 8 eliminados; verificación física: artefactos borrados, dto/index.ts y api.service.ts sin rastros de Cliente; el EACCES de api.service.ts reportado en `rollback.errores` (no hizo falta restaurarlo: el parche falló antes de mutarlo).
+  - **Rollback por validación (C)**: `rol.entity.ts` roto a propósito → pasos OK pero `preexistentesSrc: 2` → 400 "errores PREEXISTENTES en src/ (no causados por la generación). Arréglalos y reintenta. Rollback ejecutado" + rollback verificado físicamente; el fichero roto se queda roto (así estaba).
+  - **Snapshot ilegible**: `core.service.ts` chmod 000 → 400 claro "no es legible (permisos). No se escribió nada" (antes: 500 genérico).
+  - **Fallback transpile**: sin `.bin/tsc` → `modo:'transpile'` + aviso "validación solo SINTÁCTICA", registros verificados, generación exitosa y honesta.
+  - **tsc de nestool-web**: 0 errores.
+- **Hallazgos de la fase (documentados)**: (1) un error SINTÁCTICO en un fichero del programa suprime los type-errors del resto de la salida de tsc (romper rol.entity.ts ocultaba los 24 de test/; al limpiarlo reaparecen) — sin riesgo fail-open: el fichero roto reporta su error y si es tocado → rollback; (2) `bun x tsc` puede resolver un TypeScript distinto del local (skew de versión): el orquestador usa SIEMPRE el tsc del proyecto destino, que es el autoritativo.
+- **Pendiente siguiente**: F8-M1 (unificar registros con parser TS), F9-m1, F10-m1 (self-fetch → llamadas directas); decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).

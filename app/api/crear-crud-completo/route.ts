@@ -6,6 +6,7 @@ interface CrudResult {
   repository?: { success: boolean; message: string; error?: string };
   service?: { success: boolean; message: string; error?: string };
   controller?: { success: boolean; message: string; error?: string };
+  seed?: { success: boolean; message: string; error?: string };
 }
 
 export async function POST(req: NextRequest) {
@@ -124,6 +125,26 @@ export async function POST(req: NextRequest) {
       results.controller = { success: false, message: 'Error de conexión', error: String(error) };
     }
 
+    // 6. Crear seed de Funcion/endPoints (F9-M2/F10-M2: sin este seed el
+    //    PermissionGuard responde 403 para todos los usuarios tras arrancar)
+    try {
+      const seedResponse = await fetch(`${origin}/api/crear-seed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityName, basePath }),
+      });
+      const seedResult = await seedResponse.json();
+      results.seed = {
+        success: seedResponse.ok,
+        message: seedResult.message || seedResult.error || 'Error al crear el seed',
+      };
+      if (!seedResponse.ok) {
+        console.error('Error creando seed:', seedResult.error);
+      }
+    } catch (error) {
+      results.seed = { success: false, message: 'Error de conexión', error: String(error) };
+    }
+
     // Verificar si todos fueron exitosos
     const allSuccess = Object.values(results).every(r => r?.success);
     const someSuccess = Object.values(results).some(r => r?.success);
@@ -131,7 +152,7 @@ export async function POST(req: NextRequest) {
     if (allSuccess) {
       return NextResponse.json({ 
         success: true, 
-        message: `CRUD completo para ${entityName} creado exitosamente`,
+        message: `CRUD completo para ${entityName} creado exitosamente (incluye seed de permisos; reinicie la api para sembrar)`,
         results
       });
     } else if (someSuccess) {

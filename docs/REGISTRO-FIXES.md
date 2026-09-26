@@ -359,12 +359,12 @@ Template fiel al modelo (`extends GenericService<X>`, `super(configService, repo
 ### F9-M1 — 🟡 `header == key` en ListadoDto: encabezados con claves crudas
 - **Problema**: el modelo separa `header = ['id','Codigo','Nombre','Defecto']` (labels) de `key = ['id','codigo','nombre','defecto']` (claves); el generador pone los nombres de atributo crudos en AMBOS → los listados muestran camelCase como encabezados.
 - **Fix propuesto**: derivar labels (capitalizar o pedir "label" por atributo en el form) y separar header de key.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 6). Nuevo placeholder `$headerLabel` (primera letra mayúscula, resto intacto — paridad con `'Codigo'` de idioma) sustituido por la ruta; `key` conserva las claves crudas. ORDEN DE SUSTITUCIÓN CRÍTICO: `$headerLabel` ANTES que `$header` (si no, `\$header` se come el prefijo y deja basura `…'activo'Label]` — hallado y corregido en la propia verificación E2E). Aplicado en el template inline de `crear-controller/route.ts` y sincronizado `template/controller.template.ts` (nota: hay DOS copias del template, mismo patrón de doble fuente que F8-M1).
 
 ### F9-M2 — 🟡 Endpoints sin seed de Funcion/endPoint → 403 para todos los usuarios
 - **Problema**: `PermissionGuard` exige que `controller.servicio` (metadata de `@Servicio`) exista entre las funciones de los roles (BD). La api siembra funciones ('Gestión de idiomas' + endPoints); el generador no crea ese seed → el CRUD recién generado es inaccesible hasta siembra manual.
 - **Fix propuesto**: generar seed opcional (Funcion + endPoints + asignación al rol admin) o documentar el paso.
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 6). **Refinamiento del modelo real (re-lectura de api-base `ca1da1e`)**: `parseController` (main.ts, dev) ya sincroniza SOLO los EndPoint de todos los controllers (ts-morph, incluye métodos heredados) pero NO crea Funcion ni asigna; `crearMenuAdministracion` está fija a 5 controllers y `crearMenuNomenclador` solo cubre el enum → para un CRUD genérico falta Menu+Funcion+rol. Fix: nueva ruta `/api/crear-seed` que genera `src/database/seed/crud-<nombre>.seed.ts` (función idempotente `sembrarCrud<X>(app)` espejo de `crearMenuNomenclador`: menú por label, endPoints por `findByController`, Funcion create-or-update con re-sync de endPoints, alta en rol ADMINISTRADOR por id) y engancha import + llamada en `main.ts` justo DESPUÉS de `await parseController(endPointService);` (los endPoints ya existen) y ANTES de `asignarFuncionesAdmin`. Idempotente (re-run 409 por fichero, main.ts no se duplica; si main ya referenciaba el seed solo regenera el fichero). Camino defensivo: si falta el ancla en main.ts → 400 + rollback del import, main.ts intacto.
 
 ### F9-m1 — 🟢 Tag pluralizado con `+ 's'` ingenua; indentación del template no pasa prettier; import de la entity solo usado como type-param (aceptable)
 - **Estado**: ⬜ pendiente
@@ -399,7 +399,7 @@ Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `P
 - **Estado**: ⬜ pendiente
 
 ### F10-M2 — 🟡 No genera seed de funciones/endPoints (ver F9-M2) → "CRUD completo" termina en 403
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 6). Paso 6 del orquestador: llama `/api/crear-seed` y reporta su resultado en `results.seed`; el mensaje de éxito avisa "reinicie la api para sembrar". Contenido del seed: ver F9-M2.
 
 ### F10-m1 — 🟢 Self-fetch HTTP secuencial (5 round-trips); serían llamadas directas a funciones; bajo riesgo
 - **Estado**: ⬜ pendiente
@@ -428,10 +428,10 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 6 | Crear mapper | ✅ CORREGIDA (lotes 3 y 4) |
 | 7 | Crear repository | ✅ CORREGIDA (lotes 1 y 3) |
 | 8 | Crear service | ✅ CORREGIDA (lote 1; queda M1 menor) |
-| 9 | Crear controller | ✅ CORREGIDA (lote 1; quedan M1/M2) |
+| 9 | Crear controller | ✅ CORREGIDA (lotes 1 y 6; queda m1 menor) |
 | 10 | CRUD completo | ⚠️ PARCIAL (quedan C1/C2/M1: tsc real, atomicidad, honestidad) |
 
-**9/10 funciones corregidas y verificadas E2E; F10 parcial.** Pendiente: F9-M1/M2 + F10-M2 (ListadoDto header==key, seed Funcion/endPoint contra el 403), F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad), F8-M1; decisiones F5-M2/F3-m1.
+**9/10 funciones corregidas y verificadas E2E; F10 parcial.** Pendiente: F10-C1/C2/M1 (verificación post-generación con tsc, atomicidad, honestidad del success), F8-M1, F9-m1; decisiones F5-M2/F3-m1.
 
 ## Decisiones pendientes del propietario
 
@@ -534,3 +534,23 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - **F**: `tsc --noEmit` final en ambas copias: **0 errores nuevos en `src/`** (24/24 preexistentes). `tsc` de nestool-web: 0 errores.
 - **Nota de operación**: si se editan templates con el dev server arriba, turbopack puede servir el template rancio → reiniciar el server (re-verificado en este lote).
 - **Pendiente siguiente**: F9-M1 (ListadoDto header==key), F9-M2/F10-M2 (seed Funcion/endPoint → 403 del PermissionGuard), F10-C1/C2/M1 (validación post-generación, atomicidad, honestidad del success), F8-M1; decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).
+
+---
+
+### Lote 6 (listados honestos + permisos contra el 403) — ✅ APLICADO Y VERIFICADO
+- **Fixes**: F9-M1, F9-M2, F10-M2.
+- **Hallazgo del modelo real** (re-lectura de api-base `ca1da1e`): la cadena de autorización es `@Servicio(controller, servicio)` → PermissionGuard compara `controller.servicio` contra los endPoints de las Funciones de los roles. `parseController` (main.ts dev) SOLO sincroniza EndPoint de todos los controllers; NADIE crea Menu/Funcion para un CRUD genérico (`crearMenuAdministracion` fija a 5; `crearMenuNomenclador` solo enum) → sin seed, 403 para todos.
+- **Cambios**:
+  - `app/api/crear-controller/route.ts` (F9-M1): placeholder `$headerLabel` (labels capitalizados) separado de `$header` (claves crudas) en los 3 bloques ListadoDto; sustitución de `$headerLabel` SIEMPRE antes que `$header` (prefijo compartido). `template/controller.template.ts` sincronizado (doble copia documentada en F9-M1).
+  - `app/api/crear-seed/route.ts` (NUEVA, F9-M2): genera `src/database/seed/crud-<kebab>.seed.ts` con `sembrarCrud<X>(app)` idempotente (menú por label → endPoints por controller → Funcion create-or-update con re-sync de endPoints → alta en ADMINISTRADOR por id de función) y engancha import + llamada en main.ts tras `parseController`. Pre-checks de atomicidad; recovery si main ya referenciaba el seed; 400 + rollback del import si falta el ancla.
+  - `app/api/crear-crud-completo/route.ts` (F10-M2): paso 6 = `/api/crear-seed`, reportado en `results.seed`; mensaje de éxito avisa reiniciar la api para sembrar.
+- **Verificación E2E** (copias limpias de api-base + `bun install`; baseline `tsc --noEmit` = 24 errores preexistentes solo en `test/`):
+  - **A**: `crear-entidad Marca` (3 atributos) + `crear-crud-completo` → **6/6 pasos OK** (dto, mapper, repository, service, controller, seed).
+  - **B** (F9-M1): controller generado con `header = ['id','Nombre','Descripcion','Activo']` vs `key = ['id','nombre','descripcion','activo']` en los 3 bloques (paridad con idioma.controller.ts). Hallazgo del propio E2E: el orden de sustitución generaba basura `…'activo'Label]` → corregido y re-verificado.
+  - **C** (F9-M2): `main.ts` con import en línea 15 y `await sembrarCrudMarca(app);` inmediatamente tras `await parseController(endPointService);` (orden de siembra garantizado); seed file con el patrón espejo de crearMenuNomenclador.
+  - **D**: `tsc --noEmit` final: **0 errores nuevos en `src/`** (24/24 preexistentes). `tsc` de nestool-web: 0 errores.
+  - **E**: idempotencia — re-run de `crear-seed` → 409 "El seed crud-marca.seed.ts ya existe"; re-run del CRUD completo → parcial (dto true por regeneración idempotente del índice, resto 409/409-equivalentes); main.ts sin duplicar (1 import + 1 llamada tras 2 ejecuciones).
+  - **F**: camino defensivo — main.ts sin ancla `parseController` → 400 con mensaje claro y main.ts intacto (import rehecho con rollback).
+  - **G**: registros dinámicos íntegros (Marca presente en persistence.service.ts, core.service.ts, api.service.ts).
+- **Nota**: el seed se ejecuta en el arranque dev de la api (misma política que el resto de la siembra de `sembrarDatosDesarrollo`); en producción la siembra sigue siendo manual por diseño de la api.
+- **Pendiente siguiente**: F10-C1/C2/M1 (verificación post-generación con tsc real, atomicidad/cleanup, honestidad del success), F8-M1, F9-m1, F10-m1; decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).

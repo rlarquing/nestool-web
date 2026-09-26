@@ -45,7 +45,7 @@ export class $nameController extends GenericController<$nameEntity> {
 @Servicio($nServicio, 'findAll')
 async findAll(@PaginationParams() params: PaginationParamsDto): Promise<any> {
     const data = await super.findAll(params);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
@@ -190,7 +190,7 @@ async updateMultiple(@GetUser() user: UserEntity, @Body() updateMultiple$nameDto
 async filter(@PaginationParams() params: PaginationParamsDto,
 @Body() filtroGenericoDto: FiltroGenericoDto): Promise<any> {
     const data = await super.filter(params, filtroGenericoDto);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
@@ -214,7 +214,7 @@ return new ListadoDto(header, key, data);
 async search(@PaginationParams() params: PaginationParamsDto,
 @Body() buscarDto: BuscarDto): Promise<any> {
     const data = await super.search(params, buscarDto);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }

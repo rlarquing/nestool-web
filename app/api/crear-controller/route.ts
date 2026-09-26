@@ -50,7 +50,7 @@ export class $nameController extends GenericController<$nameEntity> {
 @Servicio($nServicio, 'findAll')
 async findAll(@PaginationParams() params: PaginationParamsDto): Promise<any> {
     const data = await super.findAll(params);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
@@ -195,7 +195,7 @@ async updateMultiple(@GetUser() user: UserEntity, @Body() updateMultiple$nameDto
 async filter(@PaginationParams() params: PaginationParamsDto,
 @Body() filtroGenericoDto: FiltroGenericoDto): Promise<any> {
     const data = await super.filter(params, filtroGenericoDto);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
@@ -219,7 +219,7 @@ return new ListadoDto(header, key, data);
 async search(@PaginationParams() params: PaginationParamsDto,
 @Body() buscarDto: BuscarDto): Promise<any> {
     const data = await super.search(params, buscarDto);
-    const header: string[] = ['id', $header];
+    const header: string[] = ['id', $headerLabel];
     const key: string[] = ['id', $header];
 return new ListadoDto(header, key, data);
 }
@@ -286,6 +286,14 @@ export async function POST(req: NextRequest) {
             atributos = ["'nombre'", "'descripcion'"];
         }
 
+        // F9-M1: header (etiquetas, primera letra mayúscula) separado de key
+        // (claves crudas). El modelo real (idioma.controller.ts) usa
+        // header=['id','Codigo','Nombre','Defecto'] vs key=['id','codigo',...].
+        const headerLabels: string[] = atributos.map((attr: string) => {
+            const raw = attr.replace(/'/g, '');
+            return `'${raw.charAt(0).toUpperCase()}${raw.slice(1)}'`;
+        });
+
         // Preparar template
         let template = controllerTemplate;
         template = template.replace(/\$nameService/g, serviceName);
@@ -295,6 +303,9 @@ export async function POST(req: NextRequest) {
         template = template.replace(/\$paraCont/g, nombreLower);
         template = template.replace(/\$tag/g, tag);
         template = template.replace(/\$nServicio/g, `'${nombreLower}'`);
+        // ORDEN IMPORTANTE: $headerLabel ANTES que $header (si no, /\$header/
+        // se come el prefijo de $headerLabel y deja basura "…'activo'Label]")
+        template = template.replace(/\$headerLabel/g, headerLabels.join(', '));
         template = template.replace(/\$header/g, atributos.join(', '));
 
         // Escribir archivo

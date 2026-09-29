@@ -9,6 +9,7 @@ import {
     insertarMiembroEnClase, agregarImportAContent, fusionarImportsTypeorm, leerClase,
 } from './entity-edicion';
 import { genericEntity } from '@/template/entity.template';
+import { registrarImport, registrarEnArray, combinarRegistros, RegistroResultado } from './registro-dinamico';
 
 // TypeORM imports que necesita la ENTIDAD DESTINO según la relación directa
 // que se le inyecta como inversa.
@@ -214,29 +215,14 @@ export function registrarEntidadEnIndex(entityDir: string, className: string, ke
     }
 }
 
-/** Registra la entity en el array dinámico `export const entity` de persistence.service.ts. */
-export function registrarEntidadEnPersistence(servicePath: string, className: string): void {
-    if (!existsSync(servicePath)) return;
-    let serviceContent = readFileSync(servicePath, 'utf-8');
-    const importRegex = /import\s*{([^}]*)}\s*from\s*['"]\.\/entity['"];?/;
-    if (importRegex.test(serviceContent)) {
-        serviceContent = serviceContent.replace(importRegex, (match, imports) => {
-            let importList = imports.split(',').map((i: string) => i.trim()).filter(Boolean);
-            if (!importList.includes(className)) importList.push(className);
-            importList = Array.from(new Set(importList));
-            return `import { ${importList.join(', ')} } from "./entity";`;
-        });
-    } else {
-        serviceContent = `import { ${className} } from "./entity";\n` + serviceContent;
-    }
-    const entityArrayRegex = /export\s+const\s+entity\s*=\s*\[([^\]]*)\]/;
-    if (entityArrayRegex.test(serviceContent)) {
-        serviceContent = serviceContent.replace(entityArrayRegex, (match, entities) => {
-            let entityList = entities.split(',').map((e: string) => e.trim()).filter(Boolean);
-            if (!entityList.includes(className)) entityList.push(className);
-            entityList = Array.from(new Set(entityList));
-            return `export const entity = [${entityList.join(', ')}]`;
-        });
-    }
-    writeFileSync(servicePath, serviceContent);
+/** Registra la entity en el array dinámico `export const entity` de persistence.service.ts.
+ *  F8-M1: delega en el registrar slice con parser TS (utilities/registro-dinamico) —
+ *  splice mínimo sobre el AST, idempotente e independiente del formato on-disk
+ *  (el fichero real tiene `export  const entity` con doble espacio y sin `;`). */
+export function registrarEntidadEnPersistence(servicePath: string, className: string): RegistroResultado {
+    return combinarRegistros(
+        'persistence.service.ts (entity)',
+        registrarImport(servicePath, './entity', [className]),
+        registrarEnArray(servicePath, 'entity', className),
+    );
 }

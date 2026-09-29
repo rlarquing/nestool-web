@@ -330,7 +330,7 @@ Estructura del template correcta (`extends GenericRepository<X> implements IRepo
 ### F8-M1 — 🟡 Parche regex frágil y doble fuente de verdad (mismo patrón que F7-C2)
 - **Problema**: `core.service.ts` es un array estático formateado por prettier; cualquier reformateo rompe el regex. La api consume `providers` desde `core.service.ts` — el generador no debería depender del formato exacto.
 - **Fix propuesto**: un único "registrar slice" con parser TS + anclas idempotentes que actualice los 3 registros (`persistence.service.ts`, `core.service.ts`, `api.service.ts`).
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 8). Nueva utilidad `utilities/registro-dinamico.ts`: `registrarEnArray(fichero, nombreArray, simbolo)` + `registrarImport(fichero, modulo, simbolos[])` + `combinarRegistros()`. Parser TypeScript (`ts.createSourceFile`): localiza `export const <nombre> = [...]` y los imports por AST (inmune a reformateos prettier, espacios dobles como `export  const entity`, comas finales, una/varias líneas). SPLICE MÍNIMO: inserta tras el último elemento replicando su indentación — el resto del fichero queda byte a byte igual (el regex antiguo COLAPSABA el array a una línea). Idempotente (ya presente → `modificado:false`, cero escritura). Fallos honestos: ancla ausente o EACCES → `ok:false` + `motivo` (antes: silencio). Aplicado en crear-repository (`./repository` + array `repository`), crear-mapper y crear-service (`./mapper`/`./service` + array `providers`), crear-controller (`./controller` + array `controller`) y delegado en `registrarEntidadEnPersistence` (persistence.service.ts array `entity`) para crear-entidad/crear-nomenclador/relación inversa. Las rutas exponen `avisos` cuando el registro falla; el orquestador lo detecta en la verificación de registros y hace rollback. Evidencia E2E: splices en los 3 registros con formato multi-línea intacto + tests unitarios de 5 variantes (multi-línea prettier, una línea + doble espacio sin `;`, idempotencia byte-identica, ancla ausente, import nuevo tras el último import).
 
 ### ✅ Cumple
 Template fiel al modelo (`extends GenericService<X>`, `super(configService, repo, mapper, logHistoryService, traza)`) · imports correctos · `traza` default true · guard 409 · alta en `index.ts`.
@@ -367,7 +367,7 @@ Template fiel al modelo (`extends GenericService<X>`, `super(configService, repo
 - ✅ **Estado**: CORREGIDO (lote 6). **Refinamiento del modelo real (re-lectura de api-base `ca1da1e`)**: `parseController` (main.ts, dev) ya sincroniza SOLO los EndPoint de todos los controllers (ts-morph, incluye métodos heredados) pero NO crea Funcion ni asigna; `crearMenuAdministracion` está fija a 5 controllers y `crearMenuNomenclador` solo cubre el enum → para un CRUD genérico falta Menu+Funcion+rol. Fix: nueva ruta `/api/crear-seed` que genera `src/database/seed/crud-<nombre>.seed.ts` (función idempotente `sembrarCrud<X>(app)` espejo de `crearMenuNomenclador`: menú por label, endPoints por `findByController`, Funcion create-or-update con re-sync de endPoints, alta en rol ADMINISTRADOR por id) y engancha import + llamada en `main.ts` justo DESPUÉS de `await parseController(endPointService);` (los endPoints ya existen) y ANTES de `asignarFuncionesAdmin`. Idempotente (re-run 409 por fichero, main.ts no se duplica; si main ya referenciaba el seed solo regenera el fichero). Camino defensivo: si falta el ancla en main.ts → 400 + rollback del import, main.ts intacto.
 
 ### F9-m1 — 🟢 Tag pluralizado con `+ 's'` ingenua; indentación del template no pasa prettier; import de la entity solo usado como type-param (aceptable)
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 8, los dos primeros puntos). (1) PLURALIZACIÓN: controller y seed usan `pluralizarEntidad` (utilities/entity-utils: vocal→s, consonante→es) capitalizado como el modelo real `@ApiTags('Idiomas')`; `CiudadEntity` genera `@ApiTags('Ciudades')`, label de menú `Ciudades` y ruta `/admin/ciudades` (antes: `Ciudads`/`ciudads`). (2) PRETTIER: nueva utilidad `utilities/formatear-codigo.ts` con opciones ESPEJO del `.prettierrc` de la api-base (`singleQuote:true, trailingComma:'all'`); los 9 artefactos del CRUD (4 DTOs, mapper, repository, service, controller, seed) se formatean antes de escribirse — verificado con `prettier --check` 9/9 en E2E. (3) El import de la entity como type-param queda como estaba (el registro ya lo marcaba aceptable).
 
 ### ✅ Cumple
 Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `POST /`, `POST /multiple`, `POST /importar/elementos`, `PATCH /:id`, `PATCH /elementos/multiples`, `POST /filtrar`, `POST /buscar`) · `@Servicio('idioma','findAll')` correcto · `super(service, paginationService, ruta)` correcto · `updateMultiple → Promise<ResponseDto>` correcto (coincide con generic.controller) · guards + Swagger + i18n-style responses correctos · guard 409.
@@ -402,7 +402,7 @@ Set de endpoints espejo del modelo (`/`, `/:id`, `POST /elementos/multiples`, `P
 - ✅ **Estado**: CORREGIDO (lote 6). Paso 6 del orquestador: llama `/api/crear-seed` y reporta su resultado en `results.seed`; el mensaje de éxito avisa "reinicie la api para sembrar". Contenido del seed: ver F9-M2.
 
 ### F10-m1 — 🟢 Self-fetch HTTP secuencial (5 round-trips); serían llamadas directas a funciones; bajo riesgo
-- **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (lote 8). Nueva carpeta `generadores/`: el núcleo de las 6 rutas (dto, mapper, repository, service, controller, seed) vive en funciones directas `crearX(params): Promise<NextResponse>` (misma semántica de respuesta; transformación mecánica verificada: solo cambian firma, import y `req.json()`→`params`). Las rutas de `app/api` quedan como envoltorios finos (HTTP ↔ llamada directa; el catch solo protege `req.json()`). El orquestador invoca los generadores SIN red (mapa `ejecutores`, `response.status < 400` sustituye a `response.ok`); desaparecen los round-trips HTTP y la dependencia de `origin`. Verificado E2E: 6/6 pasos, tsc y transpile, rollback y 409 intactos.
 
 ### ✅ Cumple
 Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traza` al service · estructura `results` por paso (buena base para el reporte real).
@@ -427,11 +427,11 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 5 | DTOs CRUD | ✅ CORREGIDA (lotes 2/3/5; quedan m1/m2 menores) |
 | 6 | Crear mapper | ✅ CORREGIDA (lotes 3 y 4) |
 | 7 | Crear repository | ✅ CORREGIDA (lotes 1 y 3) |
-| 8 | Crear service | ✅ CORREGIDA (lote 1; queda M1 menor) |
-| 9 | Crear controller | ✅ CORREGIDA (lotes 1 y 6; queda m1 menor) |
-| 10 | CRUD completo | ✅ CORREGIDA (lotes 6 y 7; quedan m1 menores) |
+| 8 | Crear service | ✅ CORREGIDA (lotes 1 y 8) |
+| 9 | Crear controller | ✅ CORREGIDA (lotes 1, 6 y 8) |
+| 10 | CRUD completo | ✅ CORREGIDA (lotes 6, 7 y 8) |
 
-**10/10 funciones corregidas y verificadas E2E.** Pendientes menores: F8-M1 (registros con parser TS), F9-m1, F10-m1 (self-fetch → llamadas directas); decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).
+**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Solo quedan decisiones del propietario: F5-M2 (sufijo Id), F3-m1 (nom_/orderBy) y SEC-1 (app password de Gmail en `.env.local`).
 
 ## Decisiones pendientes del propietario
 
@@ -575,3 +575,22 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - **tsc de nestool-web**: 0 errores.
 - **Hallazgos de la fase (documentados)**: (1) un error SINTÁCTICO en un fichero del programa suprime los type-errors del resto de la salida de tsc (romper rol.entity.ts ocultaba los 24 de test/; al limpiarlo reaparecen) — sin riesgo fail-open: el fichero roto reporta su error y si es tocado → rollback; (2) `bun x tsc` puede resolver un TypeScript distinto del local (skew de versión): el orquestador usa SIEMPRE el tsc del proyecto destino, que es el autoritativo.
 - **Pendiente siguiente**: F8-M1 (unificar registros con parser TS), F9-m1, F10-m1 (self-fetch → llamadas directas); decisiones del propietario F5-M2 (sufijo Id) y F3-m1 (nom_/orderBy).
+
+### Lote 8 — F8-M1 + F9-m1 + F10-m1 (registros AST, prettier/pluralización, orquestador sin HTTP) — ✅ APLICADO Y VERIFICADO
+
+**Alcance**: cierre de los tres pendientes menores; el registro dinámico deja de depender del formato, los artefactos salen formateados como el modelo y el orquestador llama a los generadores sin red.
+
+- **F10-m1 (arquitectura)**: nueva carpeta `generadores/` con `crear-dto/mapper/repository/service/controller/seed.ts` + `tipos.ts` (interfaces de params). Extracción mecánica verificada con aserciones (solo firma, import y `req.json()`→`params`); rutas = envoltorios finos; orquestador con mapa `ejecutores` y `response.status < 400`. Sin round-trips HTTP ni `origin`.
+- **F8-M1 (registros)**: `utilities/registro-dinamico.ts` (parser TS, splice mínimo que preserva el formato on-disk byte a byte, idempotente, fallos honestos con motivo). Aplicado a los 4 generadores CRUD y delegado en `registrarEntidadEnPersistence`.
+- **F9-m1 (formato/plural)**: `utilities/formatear-codigo.ts` (prettier con opciones espejo del `.prettierrc` de la api-base) en los 9 artefactos; `pluralizarEntidad` capitalizada en tag/label/ruta de menú.
+- **E2E (copia limpia /tmp/api-e2e-lote8, bun install, baseline tsc = 24 en test/)**:
+  - **A) Happy path `CiudadEntity` → CRUD**: 6/6 pasos (llamadas directas), `verificacion.modo='tsc'`, registros 3/3, `erroresTocados:[]`, `preexistentesSrc:0`, `preexistentesOtro:24`, rollback inactivo, mensaje honesto "verificado con tsc --noEmit (0 errores en src/)".
+  - **B) Splices F8-M1 con formato intacto**: `persistence.service.ts` conserva el array `repository` multi-línea y el doble espacio de `export  const entity`; `core.service.ts` recibe CiudadService+CiudadMapper (import y providers); `api.service.ts` recibe CiudadController; 3 index.ts actualizados.
+  - **C) Tests unitarios del registrador**: 5 variantes — multi-línea prettier con trailing comma (inserta con indentación igual), una línea + `export  const entity` sin `;` (queda `[A, B, C]` una línea, doble espacio y sin `;` intactos), idempotencia (re-run `modificado:false`, fichero byte-idéntico), ancla ausente (`ok:false` + motivo claro), import nuevo insertado tras el ÚLTIMO import (no al inicio).
+  - **D) `prettier --check` 9/9 artefactos** y pluralización correcta: `@ApiTags('Ciudades')`, label `Ciudades`, `to: '/admin/ciudades'` (antes `Ciudads`).
+  - **E) Pre-flight**: re-run → 409 con la lista de los 9 artefactos, sin escribir nada.
+  - **F) Rollback por registro fallido** (copia c2, `api.service.ts` chmod 444): pasos 6/6 "exitosos" pero la verificación detecta `registros.api=false` → rollback all-or-nothing (8 restaurados + 9 eliminados + EACCES reportado en `rollback.errores`); estado físico verificado: cero rastros del CRUD en src/ (solo queda la `CiudadEntity` legítima creada antes del orquestador).
+  - **G) Reintento tras rollback** (permisos restaurados): 6/6, registros 3/3, `modo='transpile'` honesto (c2 sin node_modules), `main.ts` sin duplicados (import línea 15 + llamada línea 89 tras parseController), prettier clean.
+- **tsc de nestool-web**: 0 errores tras el refactor.
+- **Nota de entorno (preexistente, no introducida por este lote)**: `eslint ^10` (package.json) es incompatible con `eslint-config-next` vía FlatCompat — `next lint`/`eslint` abortan con "TypeError: Converting circular structure to JSON" incluso en ficheros no tocados. La verificación autoritativa de este lote es `tsc --noEmit` + E2E real.
+- **Pendiente siguiente**: solo decisiones del propietario (F5-M2 sufijo `Id`, F3-m1 `nom_`/orderBy, SEC-1). Sin pendientes automatizables.

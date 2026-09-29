@@ -4,6 +4,12 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import * as ts from 'typescript';
 import { formatearNombre, eliminarSufijo } from '@/utilities/entity-utils';
+import { crearDto } from '@/generadores/crear-dto';
+import { crearMapper } from '@/generadores/crear-mapper';
+import { crearRepository } from '@/generadores/crear-repository';
+import { crearService } from '@/generadores/crear-service';
+import { crearController } from '@/generadores/crear-controller';
+import { crearSeed } from '@/generadores/crear-seed';
 
 // F10-C1/C2/M1 — Orquestador honesto y atómico:
 //
@@ -25,6 +31,10 @@ import { formatearNombre, eliminarSufijo } from '@/utilities/entity-utils';
 //
 //  F10-C2: la cadena 4–9 ensamblada (lotes 1–6) + la verificación (a)+(b)
 //  institucionalizan el "la api generada compila" dentro del orquestador.
+//
+//  F10-m1: los pasos ya NO son self-fetch HTTP (5 round-trips): el orquestador
+//  llama DIRECTAMENTE a los generadores (generadores/*.ts); las rutas de app/api
+//  quedan como envoltorios finos para el uso individual desde la UI.
 
 interface StepResult {
     success: boolean;
@@ -133,43 +143,50 @@ export async function POST(req: NextRequest) {
         }
 
         const results: { [K in Paso]?: StepResult } = {};
-        const origin = new URL(req.url).origin;
 
-        const llamar = async (paso: Paso, ruta: string, body: object): Promise<boolean> => {
+        // F10-m1: llamadas directas a los generadores (sin HTTP). Cada generador
+        // devuelve un NextResponse igual que su ruta, así que la semántica de
+        // success/mensaje no cambia: solo desaparece la red de por medio.
+        const ejecutores: { [K in Paso]: (params: never) => Promise<NextResponse> } = {
+            dto: crearDto as never,
+            mapper: crearMapper as never,
+            repository: crearRepository as never,
+            service: crearService as never,
+            controller: crearController as never,
+            seed: crearSeed as never,
+        };
+
+        const llamar = async (paso: Paso, body: object): Promise<boolean> => {
             try {
-                const response = await fetch(`${origin}${ruta}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
+                const response = await ejecutores[paso](body as never);
                 const data = await response.json();
                 results[paso] = {
-                    success: response.ok,
+                    success: response.status < 400,
                     message: data.message || data.error || `Error en el paso ${paso}`,
                 };
-                if (!response.ok) {
+                if (response.status >= 400) {
                     console.error(`Error en paso ${paso}:`, data.error);
                 }
-                return response.ok;
+                return response.status < 400;
             } catch (error) {
-                results[paso] = { success: false, message: 'Error de conexión', error: String(error) };
+                results[paso] = { success: false, message: 'Error interno del generador', error: String(error) };
                 return false;
             }
         };
 
         // --- PASOS 1..6 (fail-fast: al primer fallo se rompe y se hace rollback) ---
         let pasoFallido: Paso | null = null;
-        if (!(await llamar('dto', '/api/crear-dto', { dtoName: entityName, basePath, modo: 'crud' }))) {
+        if (!(await llamar('dto', { dtoName: entityName, basePath, modo: 'crud' }))) {
             pasoFallido = 'dto';
-        } else if (!(await llamar('mapper', '/api/crear-mapper', { entityName, basePath }))) {
+        } else if (!(await llamar('mapper', { entityName, basePath }))) {
             pasoFallido = 'mapper';
-        } else if (!(await llamar('repository', '/api/crear-repository', { entityName, basePath }))) {
+        } else if (!(await llamar('repository', { entityName, basePath }))) {
             pasoFallido = 'repository';
-        } else if (!(await llamar('service', '/api/crear-service', { entityName, basePath, traza }))) {
+        } else if (!(await llamar('service', { entityName, basePath, traza }))) {
             pasoFallido = 'service';
-        } else if (!(await llamar('controller', '/api/crear-controller', { entityName, basePath }))) {
+        } else if (!(await llamar('controller', { entityName, basePath }))) {
             pasoFallido = 'controller';
-        } else if (!(await llamar('seed', '/api/crear-seed', { entityName, basePath }))) {
+        } else if (!(await llamar('seed', { entityName, basePath }))) {
             pasoFallido = 'seed';
         }
 

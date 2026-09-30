@@ -109,11 +109,15 @@ export async function crearMapper(params: EntityParams): Promise<NextResponse> {
                     const nombreBonito = eliminarSufijo(r.destino, 'Entity');
                     const lineaMsg = '                        `' + nombreBonito + ' con id ${' + dtoField + '} no encontrado`,';
                     if (r.opcional) {
+                        // L10/F6-C4: findXById devuelve `X | null` (findOne de TypeORM);
+                        // asignarlo directo a `X | undefined` no compila (TS2322). Se usa
+                        // un intermedio que el throw-404 afina a `X` antes de asignar.
+                        const encontrado = `${r.nombre}Encontrado`;
                         bloques.push([
                             `        let ${r.nombre}: ${r.destino} | undefined;`,
                             `        if (${dtoField} !== undefined) {`,
-                            `            ${r.nombre} = await this.${nombreLower}Repository.${helper}(${dtoField});`,
-                            `            if (!${r.nombre})`,
+                            `            const ${encontrado} = await this.${nombreLower}Repository.${helper}(${dtoField});`,
+                            `            if (!${encontrado})`,
                             `                throw new NotFoundException(`,
                             `                    traducir(`,
                             `                        '${i18nKey}',`,
@@ -121,6 +125,7 @@ export async function crearMapper(params: EntityParams): Promise<NextResponse> {
                             `                        { id: ${dtoField} },`,
                             `                    ),`,
                             `                );`,
+                            `            ${r.nombre} = ${encontrado};`,
                             `        }`,
                         ].join('\n'));
                     } else {

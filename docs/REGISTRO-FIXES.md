@@ -184,7 +184,7 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 ✅ **Estado**: CORREGIDO (fase 2). generarAtributoDto emite @IsOptional() e importa IsOptional para esOpcional y esNulo. E2E: ComentarioDto con 'detalle?: string' opcional correcto.
 
 ### F4-m1 — 🟢 Opcionales con `@ApiProperty` en vez de `@ApiPropertyOptional` (la api usa este último); indentación de 1 espacio; sin `example` coherente por tipo
-- **Estado**: ⬜ pendiente
+- **Estado**: ✅ CORREGIDO (lote 10). `generarAtributoDto` emite `@ApiPropertyOptional` para esOpcional/esNulo y `@ApiProperty` para requeridos; `ejemploSwagger` usa el ejemplo del formulario SOLO si parsea para el tipo declarado (number/boolean/date validados; si no, default por tipo — `ejemploPorTipo`); import de class-validator solo con validadores usados (`importClassValidator`, sin set ⇒ sin línea); espacios líderes eliminados (prettier ya normalizaba). Bonus hallado en la propia E2E: la UI ofrece `date`/`date[]` y se emitían tal cual (TS inválido `vence?: date`) → ahora `Date`/`Date[]`. E2E: EtiquetaDto con opcionales/esNulo/ejemplos tipados (`example: 3`, `false`, `'2026-01-01'`), prettier clean.
 
 ### ✅ Cumple
 `!` en requeridos · `i18nValidationMessage('validation.*')` (claves existen en es/en) · imports sin duplicar en el caso requerido · index barrel con guard.
@@ -218,7 +218,13 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 - **Estado**: ✅ CORREGIDO (lote 9, decisión del propietario adoptada: sufijo `Id`). `generadores/crear-dto.ts` deriva `nombreDto = <rel>Id` para M:1/1:1 (con description `ID del <rel>`, paridad con `create-menu-traduccion.dto.ts`) y conserva la propiedad para M:N/O2M (`bancos!: number[]`, como `roles!: number[]` de la api). `generadores/crear-mapper.ts`: el resolver lee `createXDto.<rel>Id` / `updateXDto.<rel>Id`; el Read posicional queda alineado (`entity.banco?.id` → campo `bancoId`). E2E (CRUD de Cuenta con M:1 banco + M:N bancos): `bancoId!: number` en create/update/read, `bancos!: number[]` sin sufijo, resolver con `createCuentaDto.bancoId`, tsc real 0 errores en src/, prettier 9/9.
 
 ### F5-m1 — 🟢 `@ApiProperty({required:false})` vs `@ApiPropertyOptional`; sin `example` en modo crud; imports sin usar en update (`IsNumber` cuando no aplica)
-- **Estado**: ⬜ pendiente
+- **Estado**: ✅ CORREGIDO (lote 10). `generateCrudAttributes` devuelve validadores POR FICHERO (`validadoresCreate`/`validadoresUpdate`; IsOptional solo si el campo es opcional, IsNotEmpty solo en requeridos) y la ruta compone cada fichero con su propio import (`importClassValidator`) y su `$swagger` (`ApiProperty` / `ApiProperty, ApiPropertyOptional` según haya opcionales); Create/Update con `@ApiProperty`/`@ApiPropertyOptional` + example por tipo; Read con `@ApiProperty` + example como la api; updateMultiple añade IsNotEmpty/IsNumber del id. Bonus: `$name` sustituido con regex global — el template de update-multiple tenía 2 ocurrencias y quedaba el literal `id de la $name` en Swagger (mismo patrón que F1-C1). E2E: Suscripcion (requeridos+opcionales+M:1 opcional), imports exactos por fichero, prettier 9/9.
+
+### F6-C4 — 🔴→✅ Relación opcional: `findXById` (X | null) asignado a X | undefined (nuevo, detectado por la verificación tsc del orquestador en la E2E del lote 10)
+- **Fichero**: `generadores/crear-mapper.ts` → rama `r.opcional` del resolver.
+- **Problema**: para una relación ManyToOne/OneToOne OPCIONAL, el bloque generado hacía `let banco: BancoEntity | undefined; banco = await this.repository.findBancoById(...)` — el helper devuelve `Promise<X | null>` (findOne de TypeORM) → TS2322 (`Type 'BancoEntity | null' is not assignable to type 'BancoEntity | undefined'`). Bug LATENTE: ninguna E2E anterior había ejercitado relaciones opcionales (Tarea/Cuenta las llevaban requeridas); la verificación tsc real del orquestador (F10-C1) lo atrapó en su primera aparición y ejecutó rollback antes de corregir el generador.
+- **Fix aplicado (lote 10)**: intermedio `<rel>Encontrado` — `const bancoEncontrado = await find(...); if (!bancoEncontrado) throw NotFound(i18n); banco = bancoEncontrado;` (el throw afina a `X`). E2E: Suscripcion con M:1 opcional → success honesto, modo tsc, 0 errores en src/.
+- ✅ **Estado**: CORREGIDO (lote 10).
 
 ### ✅ Cumple
 Relaciones como ids (number/number[]) para no-nomenclador ✓ · `!`/`?` según nulabilidad ✓ · i18n ✓ (claves existen) · IsOptional garantizado en update ✓ · UpdateMultiple con id requerido numérico ✓ (existe el patrón en la api) · Read DTO con constructor posicional ✓ (solo difiere en opcionalidad, compila).
@@ -431,7 +437,7 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 9 | Crear controller | ✅ CORREGIDA (lotes 1, 6 y 8) |
 | 10 | CRUD completo | ✅ CORREGIDA (lotes 6, 7 y 8) |
 
-**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Las decisiones de convención del propietario quedaron adoptadas en el lote 9 (F5-M2: sufijo `Id`; F3-m1: tabla plana + orderBy). Solo queda SEC-1 (app password de Gmail en `.env.local`) y los menores F4-m1/F5-m1/F5-m2-cosméticos si se quisiera pulir aún más.
+**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Las decisiones de convención del propietario quedaron adoptadas en el lote 9 (F5-M2: sufijo `Id`; F3-m1: tabla plana + orderBy) y los menores cosméticos cerrados en el lote 10 (F4-m1, F5-m1, F6-C4). Solo queda SEC-1 (app password de Gmail en `.env.local`, acción del propietario) y la limpieza opcional de `lib/` (andamiaje CLI pre-API que solo usa `preguntaBase.js`).
 
 ## Decisiones del propietario — RESUELTAS (lote 9)
 
@@ -604,3 +610,15 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - **C) Artefactos generados**: create/update/read con `bancoId!: number` + `'ID del banco'` y `bancos!: number[]` sin sufijo; mapper con `findBancoById(createCuentaDto.bancoId)` + `cuenta.BANCO_NOT_FOUND` i18n + Read posicional `cuentaEntity.banco?.id` → `bancoId`; seed `label='Cuentas'` (plural correcto); `prettier --check` 9/9; `main.ts` con import+llamada del seed.
   - **D) Aprendizaje del montaje (no es bug)**: la primera corrida del orquestador dio `registros.persistence=false` y rollback limpio — la verificación exige el símbolo de la entity Y del repository en persistence.service.ts; la entity de prueba se había creado a mano sin pasar por `crear-entidad`/`crear-nomenclador` (que son quienes la registran, "paso aparte" por diseño desde el lote 7). Registrada la entity como lo hace `crear-entidad` → reintento 100% verde. El rollback all-or-nothing funcionó exactamente como fue diseñado.
 - **tsc de nestool-web**: 0 errores.
+
+### Lote 10 — F4-m1 + F5-m1 + F6-C4 (swagger fiel, imports por fichero, mapper opcional) + limpieza de templates — ✅ APLICADO Y VERIFICADO
+- **F4-m1**: `generarAtributoDto` con `@ApiPropertyOptional` para opcionales, `ejemploSwagger` (ejemplo del formulario solo si parsea para el tipo; si no `ejemploPorTipo`), import de class-validator solo con lo usado, `date`/`date[]` de la UI → `Date`/`Date[]`.
+- **F5-m1**: validadores por fichero (create/update/updateMultiple), `$swagger` parametrizado (`ApiProperty` / `ApiProperty, ApiPropertyOptional`), Read estilo api con example, `$name` con regex global (el literal `id de la $name` de update-multiple, mismo patrón que F1-C1).
+- **F6-C4**: bug latente del mapper (relación opcional, `X | null` → `X | undefined`, TS2322) atrapado por la verificación tsc real del orquestador en su primera E2E con relaciones opcionales; intermedio `<rel>Encontrado` afinado por el throw-404.
+- **Limpieza**: 25 ficheros muertos eliminados de `template/` (11 templates .ts sin uso + todos los .js duplicados). Quedan `entity/mapper/repository.template.ts` (vivos) y `preguntaBase.js` (usado por `lib/`, andamiaje CLI pre-API reportado al propietario).
+- **E2E (copia /tmp/api-e2e-lote9, baseline 24 en test/)**:
+  - **A) SuscripcionEntity** (string/boolean requeridos + number/Date opcionales + M:1 OPCIONAL a BancoEntity): 1ª corrida del orquestador → rollback limpio por TS2322 del mapper (F6-C4, la red de seguridad funcionó) → fix → 2ª corrida `success:true`, modo tsc, registros 3/3, `erroresTocados:[]`, preexistentesSrc:0.
+  - **B) DTOs de Suscripcion**: create con `@ApiProperty` (requeridos) y `@ApiPropertyOptional` (opcionales) + examples por tipo (`'texto'`, `1`, `false`, `'2026-01-01'`, `ID del banco: 1`); imports exactos por fichero (sin sobrantes); read estilo api; update-multiple con `id de la Suscripcion` (ya sin `$name`).
+  - **C) Modo nuevo (EtiquetaDto)**: opcionales/esNulo correctos, ejemplo del formulario usado solo si parsea (`3` sin comillas; `'no-parseable!'` de fecha cae al default `'2026-01-01'`), `vence?: Date` (antes TS inválido), prettier clean.
+  - **D) tsc de la copia tras generar: 0 errores en src/**; prettier clean en todos los artefactos nuevos; tsc de nestool-web: 0 errores.
+- **Nota de entorno**: `next lint` fue ELIMINADO en Next 16 (`Invalid project directory: lint`); el arreglo real exige migrar a flat-config de ESLint 10 — queda documentado como pendiente opcional de tooling; la verificación autoritativa sigue siendo tsc + E2E.

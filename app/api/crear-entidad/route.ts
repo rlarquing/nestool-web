@@ -4,6 +4,7 @@ import path from 'path';
 import {
     formatearNombre, eliminarSufijo, generarColumna, generarRelacion,
     generarToStringBody, aInicialMinuscula, pluralizarEntidad, snakeDe, ordenRequeridoPrimero,
+    tipoTsDe,
 } from '@/utilities/entity-utils';
 import { inyectarRelacionInversa, registrarEntidadEnIndex, registrarEntidadEnPersistence } from '@/utilities/relacion-inversa';
 import { genericEntity } from '@/template/entity.template';
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
                 // El constructor replica la opcionalidad de la propiedad: el mapper
                 // pasa createXDto.<attr> (string | undefined si es nulable)
                 constructorAttrs.push({
-                    param: `${atributo.nombreAtributo}${atributo.nulo === true ? '?' : ''}: ${atributo.tipoDato}`,
+                    param: `${atributo.nombreAtributo}${atributo.nulo === true ? '?' : ''}: ${tipoTsDe(atributo.tipoDato)}`,
                     asignacion: `this.${atributo.nombreAtributo} = ${atributo.nombreAtributo};`,
                     requerido: atributo.nulo !== true,
                 });

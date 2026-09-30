@@ -165,6 +165,16 @@ function importClassValidator(validadores: Set<string>): string {
     return validadores.size > 0 ? `import { ${Array.from(validadores).join(', ')} } from 'class-validator';` : '';
 }
 
+// F7-C2: unificar la opcionalidad entre los DOS formatos de payload. El formulario
+// "nuevo DTO" manda nuloOpcional ('noNulo'|'esOpcional'|'esNulo') y el flujo de
+// edición de entity manda nulo (boolean). Antes, un payload con nulo:true caía en
+// el default del switch (atributo opcional) pero NO activaba el import de
+// ApiPropertyOptional → fichero con TS2304.
+function opcionalidadDe(a: any): 'noNulo' | 'esOpcional' | 'esNulo' {
+    if (a?.nuloOpcional) return a.nuloOpcional;
+    return a?.nulo === true ? 'esNulo' : 'noNulo';
+}
+
 function generarAtributoDto(atributo: AtributoDto): { 
     atributo: string; 
     validadores: string[]; 
@@ -187,9 +197,10 @@ function generarAtributoDto(atributo: AtributoDto): {
     if (tipo === 'date') tipo = 'Date';
     else if (tipo === 'date[]') tipo = 'Date[]';
     
-    // Generar declaración del atributo según opcionalidad
+    // Generar declaración del atributo según opcionalidad (F7-C2: opcionalidadDe
+    // acepta nuloOpcional del formulario Y nulo:boolean del flujo de entity)
     let atributoStr = '';
-    switch (atributo.nuloOpcional) {
+    switch (opcionalidadDe(atributo)) {
         case 'noNulo':
             validadores.push('IsNotEmpty');
             codigoValidadores += '@IsNotEmpty()\n';
@@ -239,8 +250,11 @@ function generarAtributoDto(atributo: AtributoDto): {
 
     // L10 F4-m1: opcionales con @ApiPropertyOptional (convención de la api-base,
     // update-idioma.dto.ts) y example coherente por tipo (ya no string literal).
-    const esOpcionalSwagger = atributo.nuloOpcional !== 'noNulo';
-    const apiProperty = `@${esOpcionalSwagger ? 'ApiPropertyOptional' : 'ApiProperty'}({ description: '${atributo.descripcion}', example: ${ejemploSwagger(atributo.tipoDato, atributo.ejemplo)} })\n`;
+    // F7-C2: opcionalidad vía opcionalidadDe (nuloOpcional o nulo:boolean) y
+    // description por defecto = nombre del atributo (antes salía literal 'undefined').
+    const esOpcionalSwagger = opcionalidadDe(atributo) !== 'noNulo';
+    const descripcionSwagger = atributo.descripcion?.trim() ? atributo.descripcion : atributo.nombreAtributo;
+    const apiProperty = `@${esOpcionalSwagger ? 'ApiPropertyOptional' : 'ApiProperty'}({ description: '${descripcionSwagger}', example: ${ejemploSwagger(atributo.tipoDato, atributo.ejemplo)} })\n`;
     
     const codigoCompleto = codigoValidadores + apiProperty + atributoStr;
     
@@ -504,7 +518,7 @@ export async function crearDto(params: CrearDtoParams): Promise<NextResponse> {
             // Preparar template
             // L10 F4-m1: $validadoresImport (import solo con validadores usados, sin
             // línea si no hay ninguno) y $swagger con ApiPropertyOptional si hay opcionales.
-            const tieneOpcionalNuevo = atributos.some((a: any) => a?.nuloOpcional && a.nuloOpcional !== 'noNulo');
+            const tieneOpcionalNuevo = atributos.some((a: any) => opcionalidadDe(a) !== 'noNulo');
             let template = dtoTemplate;
             template = template.replace('$validadoresImport', importClassValidator(new Set(validadores)));
             template = template.replace('$swagger', tieneOpcionalNuevo ? 'ApiProperty, ApiPropertyOptional' : 'ApiProperty');

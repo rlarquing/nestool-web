@@ -36,6 +36,15 @@ export function pluralizarEntidad(claseEntity: string): string {
     return `${base}es`;
 }
 
+/**
+ * F7-C1: la UI ofrece 'date' (minúscula) y 'Timestamp' como tipo de fecha, pero
+ * el tipo TS real es Date (misma familia que el fix F4-m1 en los DTOs). Los arrays
+ * ('date[]') se dejan intactos: la emisión de columnas array se trata aparte.
+ */
+export function tipoTsDe(tipoDato: string): string {
+    return tipoDato === 'date' || tipoDato === 'Timestamp' ? 'Date' : tipoDato;
+}
+
 export function generarColumna(atributo: any, databaseType: string = 'postgresql'): string {
     let opciones: string[] = [];
     if (atributo.tipoDato === 'string') {
@@ -59,7 +68,7 @@ export function generarColumna(atributo: any, databaseType: string = 'postgresql
         } else {
             opciones.push('type: "decimal"');
         }
-    } else if (atributo.tipoDato === 'Date' || atributo.tipoDato === 'Timestamp') {
+    } else if (tipoTsDe(atributo.tipoDato) === 'Date') {
         if (databaseType === 'postgresql') {
             opciones.push('type: "timestamp"');
         } else if (databaseType === 'mysql') {
@@ -86,11 +95,9 @@ export function generarColumna(atributo: any, databaseType: string = 'postgresql
     }
     // F1-M2: nombre de columna snake_case explícito, como en la api-base
     opciones.push(`name: '${snakeDe(atributo.nombreAtributo)}'`);
-    let tipoTypeScript = atributo.tipoDato;
+    let tipoTypeScript = tipoTsDe(atributo.tipoDato);
     if (atributo.tipoDato === 'number' && atributo.integer) {
         tipoTypeScript = 'number';
-    } else if (atributo.tipoDato === 'Date' || atributo.tipoDato === 'Timestamp') {
-        tipoTypeScript = 'Date';
     }
     const optionsString = opciones.length > 0 ? `{ ${opciones.join(', ')} }` : '';
     // TS estricto (strictPropertyInitialization): requeridas llevan "!", nulables "?"

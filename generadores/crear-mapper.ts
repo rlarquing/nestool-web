@@ -100,7 +100,10 @@ export async function crearMapper(params: EntityParams): Promise<NextResponse> {
             const resolver = (dtoVar: 'create' | 'update'): string => {
                 const bloques: string[] = [];
                 for (const r of conDestino) {
-                    const dtoField = `${dtoVar}${nombre}Dto.${r.nombre}`;
+                    // F5-M2: el campo del DTO lleva sufijo Id para relaciones unitarias
+                    // (convención api-base: create-menu-traduccion.dto.ts → menuId).
+                    // conDestino solo contiene ManyToOne/OneToOne, siempre lleva Id.
+                    const dtoField = `${dtoVar}${nombre}Dto.${r.nombre}Id`;
                     const helper = `find${eliminarSufijo(r.destino, 'Entity')}ById`;
                     const i18nKey = `${kebab}.${r.nombre.toUpperCase()}_NOT_FOUND`;
                     const nombreBonito = eliminarSufijo(r.destino, 'Entity');

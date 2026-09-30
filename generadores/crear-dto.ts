@@ -243,6 +243,15 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
                 : 'number';
         }
 
+        // F5-M2: convención de la api-base — los ids de relación unitaria (ManyToOne/
+        // OneToOne) llevan sufijo Id en los DTOs (create-menu-traduccion.dto.ts:
+        // menuId!: number con description 'ID del menu'); las colecciones (OneToMany/
+        // ManyToMany) conservan el nombre de la propiedad (create-user.dto.ts: roles!: number[]).
+        const esRelacionUnitaria = tipo === 'relation'
+            && attr.tipoRelacion !== 'OneToMany' && attr.tipoRelacion !== 'ManyToMany';
+        const nombreDto = esRelacionUnitaria ? `${attr.nombreAtributo}Id` : attr.nombreAtributo;
+        const descripcionDto = esRelacionUnitaria ? `ID del ${attr.nombreAtributo}` : attr.nombreAtributo;
+
         // Generar validadores según nullable (las relaciones requeridas TAMBIÉN
         // necesitan IsNotEmpty en el create, como en la api-base)
         if (attr.nulo === false) {
@@ -282,27 +291,27 @@ function generateCrudAttributes(atributos: any[], basePath: string): {
         const bloqueTipo = tipoValidador ? `    ${tipoValidador}\n` : '';
 
         if (attr.nulo === false) {
-            createAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}!: ${dtoType};`);
+            createAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${descripcionDto}' })\n    ${nombreDto}!: ${dtoType};`);
         } else {
-            createAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+            createAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${descripcionDto}', required: false })\n    ${nombreDto}?: ${dtoType};`);
         }
 
         // UPDATE DTO - misma opcionalidad que el create (modelo api-base:
         // update-idioma.dto.ts mantiene @IsNotEmpty en los campos requeridos)
         if (attr.nulo === false) {
-            updateAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}' })\n    ${attr.nombreAtributo}!: ${dtoType};`);
+            updateAttrs.push(`    @IsNotEmpty()\n${bloqueTipo}    @ApiProperty({ description: '${descripcionDto}' })\n    ${nombreDto}!: ${dtoType};`);
         } else {
-            updateAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+            updateAttrs.push(`    @IsOptional()\n${bloqueTipo}    @ApiProperty({ description: '${descripcionDto}', required: false })\n    ${nombreDto}?: ${dtoType};`);
         }
 
         // READ DTO - incluir todos (declaraciones y parámetros opcionales para que
         // el constructor positional del mapper siempre compile). Sin validadores:
         // los Read*Dto de la api-base solo llevan @ApiProperty.
-        readAttrs.push(`    @ApiProperty({ description: '${attr.nombreAtributo}', required: false })\n    ${attr.nombreAtributo}?: ${dtoType};`);
+        readAttrs.push(`    @ApiProperty({ description: '${descripcionDto}', required: false })\n    ${nombreDto}?: ${dtoType};`);
 
-        // Parámetros para el constructor del Read DTO
-        parametrosList.push(`${attr.nombreAtributo}?: ${dtoType}`);
-        thisAttrsList.push(`this.${attr.nombreAtributo} = ${attr.nombreAtributo};`);
+        // Parámetros para el constructor del Read DTO (mismo nombre que la declaración)
+        parametrosList.push(`${nombreDto}?: ${dtoType}`);
+        thisAttrsList.push(`this.${nombreDto} = ${nombreDto};`);
     }
 
     return {

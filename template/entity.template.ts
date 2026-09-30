@@ -21,12 +21,15 @@ export class $nameEntity extends GenericEntity {
     }
 }
 `;
+// F3-m1: tabla plana sin prefijo (las 11 entities de la api-base usan nombre
+// plano; el prefijo nom_ no tenía anclaje en el modelo) + orderBy id ASC
+// (convención universal del modelo, paridad con genericEntity).
 export const genericNomencladorEntity=`
 import {Entity} from "typeorm";
 import {GenericNomencladorEntity} from "./generic-nomenclador.entity";
 import { SchemaEnum } from '../../database/schema/schema.enum';
 
-@Entity('nom_$entidad', { schema: SchemaEnum.$schema })
+@Entity('$entidad', { schema: SchemaEnum.$schema, orderBy: { id: 'ASC' } })
 export class $nameEntity extends GenericNomencladorEntity {
 }
 `;

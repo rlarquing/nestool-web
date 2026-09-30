@@ -5,6 +5,7 @@ import { formatearNombre, eliminarSufijo, aInicialMinuscula } from '@/utilities/
 import { registrarEntidadEnIndex, registrarEntidadEnPersistence } from '@/utilities/relacion-inversa';
 import { genericNomencladorEntity } from '@/template/entity.template';
 import { repositoryNomencladorTemplate } from '@/template/repository.template';
+import { formatearCodigo } from '@/utilities/formatear-codigo';
 
 // Fase 5 (F3-C1/C2/C3): el nomenclador pasa de INERTE a VIVO.
 //  - F3-C1: ya no se parchea el repository GENÉRICO (clase plana con mapa por
@@ -91,7 +92,8 @@ export async function POST(req: NextRequest) {
         template = template.replace('$nameEntity', className);
         template = template.replace('$entidad', nombreFormateado);
         template = template.replace('$schema', esquemaEnum);
-        writeFileSync(filePath, template);
+        // F9-m1/Lote 9: el artefacto pasa prettier, igual que los CRUD y el modelo
+        writeFileSync(filePath, await formatearCodigo(template, `${nombreKebab}.entity.ts`));
 
         // Alta en entity/index.ts (helper compartido: formato con espacios como la api)
         registrarEntidadEnIndex(entityDir, className, nombreKebab);
@@ -105,7 +107,8 @@ export async function POST(req: NextRequest) {
             .replace(/\$name/g, nombreSinSufijo)
             .replace(/\$param/g, nombreLower)
             .replace(/\$registro/g, nombreLower);
-        writeFileSync(repoFilePath, repoTemplate);
+        // F9-m1/Lote 9: el artefacto pasa prettier, igual que los CRUD y el modelo
+        writeFileSync(repoFilePath, await formatearCodigo(repoTemplate, `${nombreKebab}.repository.ts`));
 
         // Alta en repository/index.ts (formato con espacios, igual al de la api)
         altaEnIndex(

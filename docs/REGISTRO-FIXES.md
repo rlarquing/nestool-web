@@ -27,7 +27,8 @@
 - **Problema**: los templates usan `$name` (o `$entidad`) **2+ veces**, pero `String.replace()` con string solo sustituye la **primera** ocurrencia. Las inversas inyectadas en la entidad destino quedan con `(variable) => $name.propiedad` y `@JoinColumn({ name: '$name_id' })` literales.
 - **Consecuencia**: `Cannot find name '$name'` al compilar la api; FK con nombre literal.
 - **Fix propuesto**: usar `.replaceAll()` o regex global en todos los reemplazos de placeholders (`/\\$name/g`), y renombrar placeholders de forma única por ocurrencia.
-- 🧪 **Estado**: ⬜ pendiente
+- ✅ **Estado**: CORREGIDO (la entrada estaba obsoleta respecto al código real; verificada tras el lote 9). La generación de inversas ya no usa esos templates: `generarRelacionInversa` (utilities/entity-utils.ts) interpola directamente `${ctx.entidadOrigen}`/`${varOrigen}` — es estructuralmente imposible que salga un literal `$name`. Los templates `many-to-one/one-to-many/one-to-one/many-to-many.template.ts` quedaron como código muerto (nadie los importa; su limpieza va con el resto de templates no usados).
+- 🧪 Evidencia E2E (post-lote 9): `crear-entidad` Prestamo con ManyToOne→BancoEntity → inversa inyectada en banco.entity.ts como `@OneToMany(() => PrestamoEntity, (prestamo) => prestamo.banco)` + `prestamos!: PrestamoEntity[];`, 0 literales de placeholder, tsc 0 errores en src/.
 
 ### F1-C2 — 🔴 Callback de inversa erróneo en el lado directo (`generarRelacion`)
 - **Fichero**: `utilities/entity-utils.ts` → `generarRelacion()` (OneToMany y ManyToOne).
@@ -165,7 +166,7 @@
 - ✅ **Estado**: CORREGIDO (fase 5).
 
 ### F3-m1 — 🟢 Tabla con prefijo `nom_` sin anclaje en la api; sin orderBy
-- **Estado**: ⬜ pendiente (decisión del propietario; el template ya emite `nom_` de fábrica — si se decide quitar, es un cambio de una línea en `entity.template.ts`).
+- **Estado**: ✅ CORREGIDO (lote 9, decisión del propietario adoptada). `genericNomencladorEntity` emite `@Entity('$entidad', { schema: SchemaEnum.$schema, orderBy: { id: 'ASC' } })` — tabla plana (verificado: 0 tablas con `nom_` en toda la api; las 11 entities reales llevan orderBy) y orderBy id ASC (convención universal del modelo). Bonus: la entity y el repository del nomenclador pasan por prettier (paridad con los artefactos CRUD del lote 8). E2E: Banco → `@Entity('banco', { schema: SchemaEnum.MOD_NOMENCLATOR, orderBy: { id: 'ASC' } })` + prettier clean.
 
 ### ✅ Cumple
 Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` · entrada en `NomencladorTypeEnum` (regex válida para el fichero real; `main.ts` la consume).
@@ -214,8 +215,7 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 
 ### F5-M2 — 🟡 Nomenclatura de relaciones: `menu!: number` vs `menuId!: number` del modelo
 - **Problema**: la api nombra los ids de relación con sufijo `Id` (`menuId`, `idiomaId`, `roles`); el generador usa el nombre de propiedad de la entity. Coherente internamente, pero rompe la convención documental y de Swagger de la api.
-- **Fix propuesto**: decidir convención con el propietario; si se adopta `<relacion>Id`, propagar al mapper (#6).
-- **Estado**: ⬜ pendiente (decisión de propietario)
+- **Estado**: ✅ CORREGIDO (lote 9, decisión del propietario adoptada: sufijo `Id`). `generadores/crear-dto.ts` deriva `nombreDto = <rel>Id` para M:1/1:1 (con description `ID del <rel>`, paridad con `create-menu-traduccion.dto.ts`) y conserva la propiedad para M:N/O2M (`bancos!: number[]`, como `roles!: number[]` de la api). `generadores/crear-mapper.ts`: el resolver lee `createXDto.<rel>Id` / `updateXDto.<rel>Id`; el Read posicional queda alineado (`entity.banco?.id` → campo `bancoId`). E2E (CRUD de Cuenta con M:1 banco + M:N bancos): `bancoId!: number` en create/update/read, `bancos!: number[]` sin sufijo, resolver con `createCuentaDto.bancoId`, tsc real 0 errores en src/, prettier 9/9.
 
 ### F5-m1 — 🟢 `@ApiProperty({required:false})` vs `@ApiPropertyOptional`; sin `example` en modo crud; imports sin usar en update (`IsNumber` cuando no aplica)
 - **Estado**: ⬜ pendiente
@@ -424,19 +424,19 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 2 | Editar entity | ✅ CORREGIDA (lote 4 — edición quirúrgica) |
 | 3 | Crear nomenclador | ✅ CORREGIDA (lote 5 — nomenclador vivo) |
 | 4 | Nuevo DTO | ✅ CORREGIDA (lote 2) |
-| 5 | DTOs CRUD | ✅ CORREGIDA (lotes 2/3/5; quedan m1/m2 menores) |
+| 5 | DTOs CRUD | ✅ CORREGIDA (lotes 2/3/5 y 9; quedan m1/m2 menores) |
 | 6 | Crear mapper | ✅ CORREGIDA (lotes 3 y 4) |
 | 7 | Crear repository | ✅ CORREGIDA (lotes 1 y 3) |
 | 8 | Crear service | ✅ CORREGIDA (lotes 1 y 8) |
 | 9 | Crear controller | ✅ CORREGIDA (lotes 1, 6 y 8) |
 | 10 | CRUD completo | ✅ CORREGIDA (lotes 6, 7 y 8) |
 
-**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Solo quedan decisiones del propietario: F5-M2 (sufijo Id), F3-m1 (nom_/orderBy) y SEC-1 (app password de Gmail en `.env.local`).
+**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Las decisiones de convención del propietario quedaron adoptadas en el lote 9 (F5-M2: sufijo `Id`; F3-m1: tabla plana + orderBy). Solo queda SEC-1 (app password de Gmail en `.env.local`) y los menores F4-m1/F5-m1/F5-m2-cosméticos si se quisiera pulir aún más.
 
-## Decisiones pendientes del propietario
+## Decisiones del propietario — RESUELTAS (lote 9)
 
-1. **F5-M2**: ¿adoptar sufijo `Id` en los campos de relación de DTOs (`menuId`) como la api, o mantener el nombre de propiedad?
-2. **F3-m1**: ¿prefijo de tabla `nom_` para nomencladores o tabla sin prefijo?
+1. **F5-M2**: ✅ **ADOPTADO sufijo `Id`** para relaciones unitarias (M:1/1:1) — `bancoId!: number` con description `ID del banco`, paridad con `create-menu-traduccion.dto.ts`; colecciones M:N/O2M sin sufijo (`bancos!: number[]`, como `roles!: number[]`). Propagado al mapper relacional (resolver lee `createXDto.<rel>Id`).
+2. **F3-m1**: ✅ **ADOPTADO tabla plana sin `nom_`** + **`orderBy: { id: 'ASC' }`** — las 11 entities reales de la api usan nombre plano y todas llevan orderBy; el prefijo no tenía anclaje en el modelo.
 3. **F1-M5/F2-M2**: ¿incluir relaciones dueñas (M:1/1:1) en el constructor de la entity como hace `menu-traduccion.entity.ts`? → *IMPLEMENTADO en fase 3 siguiendo el fix propuesto del registro (sí incluirlas, con orden requeridos-primero); el propietario puede pedir revertirlo.*
 
 ---
@@ -594,3 +594,13 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 - **tsc de nestool-web**: 0 errores tras el refactor.
 - **Nota de entorno (preexistente, no introducida por este lote)**: `eslint ^10` (package.json) es incompatible con `eslint-config-next` vía FlatCompat — `next lint`/`eslint` abortan con "TypeError: Converting circular structure to JSON" incluso en ficheros no tocados. La verificación autoritativa de este lote es `tsc --noEmit` + E2E real.
 - **Pendiente siguiente**: solo decisiones del propietario (F5-M2 sufijo `Id`, F3-m1 `nom_`/orderBy, SEC-1). Sin pendientes automatizables.
+
+### Lote 9 — F5-M2 + F3-m1 (convenciones del propietario adoptadas: sufijo Id, tabla plana + orderBy) — ✅ APLICADO Y VERIFICADO
+- **F5-M2 (nomenclatura de relaciones)**: `generadores/crear-dto.ts` deriva `nombreDto`/`descripcionDto` en el bucle de atributos — relaciones unitarias (ManyToOne/OneToOne) emiten `<rel>Id` con description `ID del <rel>` en Create/Update/Read/Multiple y en el constructor posicional del Read; colecciones (OneToMany/ManyToMany) conservan la propiedad sin sufijo. `generadores/crear-mapper.ts`: el resolver (create y update) lee `createXDto.<rel>Id`; asignaciones del update y claves i18n siguen usando el nombre de la relación (no cambian).
+- **F3-m1 (nomenclador)**: `genericNomencladorEntity` emite tabla plana + `orderBy: { id: 'ASC' }` (fundamento: 0 tablas con `nom_` en la api; las 11 entities reales llevan orderBy; la api no ancla el prefijo en nada). Bonus Lote 8: entity y repository del nomenclador pasan por prettier (antes: comillas dobles y sin formato).
+- **E2E (copia limpia /tmp/api-e2e-lote9 + bun install, baseline tsc = 24 en test/, 0 en src/)**:
+  - **A) Nomenclador Banco**: `@Entity('banco', { schema: SchemaEnum.MOD_NOMENCLATOR, orderBy: { id: 'ASC' } })` + `prettier --check` clean en entity y repository; registros (entity/repository/enum) intactos.
+  - **B) CRUD de Cuenta** (entity manual con M:1 unidireccional `banco` + M:N `bancos`): orquestador `success:true`, `modo='tsc'`, registros 3/3, `erroresTocados:[]`, `preexistentesSrc:0`, `preexistentesOtro:24`, rollback inactivo.
+  - **C) Artefactos generados**: create/update/read con `bancoId!: number` + `'ID del banco'` y `bancos!: number[]` sin sufijo; mapper con `findBancoById(createCuentaDto.bancoId)` + `cuenta.BANCO_NOT_FOUND` i18n + Read posicional `cuentaEntity.banco?.id` → `bancoId`; seed `label='Cuentas'` (plural correcto); `prettier --check` 9/9; `main.ts` con import+llamada del seed.
+  - **D) Aprendizaje del montaje (no es bug)**: la primera corrida del orquestador dio `registros.persistence=false` y rollback limpio — la verificación exige el símbolo de la entity Y del repository en persistence.service.ts; la entity de prueba se había creado a mano sin pasar por `crear-entidad`/`crear-nomenclador` (que son quienes la registran, "paso aparte" por diseño desde el lote 7). Registrada la entity como lo hace `crear-entidad` → reintento 100% verde. El rollback all-or-nothing funcionó exactamente como fue diseñado.
+- **tsc de nestool-web**: 0 errores.

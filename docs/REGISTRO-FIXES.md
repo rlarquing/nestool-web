@@ -88,6 +88,12 @@
 - **Fix propuesto**: añadir orderBy al template; opcionalmente generar `@Index` de clase cuando `unico` (modelo: `UQ_<tabla>_<col>` con `where '"activo" = true'`).
 - ✅ **Estado**: CORREGIDO (fase 3, resuelve la decisión pendiente del propietario según el fix propuesto). OneToOne/ManyToOne entran al constructor; colecciones fuera. ORDEN compartido requeridos-primero (TS1016): crear-entidad y crear-mapper usan `ordenRequeridoPrimero` para que el `new XEntity(...)` del mapper coincida posición a posición.
 
+### F1-C6 — 🔴→✅ La entity emitía `date`/`Timestamp` crudos como tipo TS (nuevo, detectado en la E2E del lote 11)
+- **Ficheros**: `utilities/entity-utils.ts` (`generarColumna`) + `app/api/crear-entidad/route.ts` (constructor).
+- **Problema**: la UI ofrece `date` (minúscula) y `Timestamp`; `generarColumna` solo mapeaba `Date` capitalizada. Con `tipoDato: 'date'` se emitía `fechaAlta?: date` (TS2552), la `@Column` SIN `type` (la rama timestamp no matcheaba) y el constructor `fechaAlta: date`. Es el mismo defecto de familia que F4-m1 corrigió en los DTOs (lote 10) pero en la rama de entities — ninguna E2E anterior había creado una entity con atributo `date` (Tarea/Cuenta/Suscripcion previas: string/number/boolean).
+- **Fix aplicado (lote 11)**: helper `tipoTsDe()` (`date`|`Timestamp` → `Date`, arrays intactos) usado en el branch de columna y en `tipoTypeScript`; el constructor de `crear-entidad` también emite `tipoTsDe(atributo.tipoDato)`.
+- ✅ **Estado**: CORREGIDO (lote 11). Nota: el commit de código del lote 11 usó provisionalmente la etiqueta "F7-C1" (colisiona con IDs de Función 7); el ID canónico es F1-C6.
+
 ---
 
 ## Función 2 — Editar entity (`/api/actualizar-entidad`)
@@ -185,6 +191,12 @@ Hereda `GenericNomencladorEntity` · kebab-case · 409 si existe · `index.ts` �
 
 ### F4-m1 — 🟢 Opcionales con `@ApiProperty` en vez de `@ApiPropertyOptional` (la api usa este último); indentación de 1 espacio; sin `example` coherente por tipo
 - **Estado**: ✅ CORREGIDO (lote 10). `generarAtributoDto` emite `@ApiPropertyOptional` para esOpcional/esNulo y `@ApiProperty` para requeridos; `ejemploSwagger` usa el ejemplo del formulario SOLO si parsea para el tipo declarado (number/boolean/date validados; si no, default por tipo — `ejemploPorTipo`); import de class-validator solo con validadores usados (`importClassValidator`, sin set ⇒ sin línea); espacios líderes eliminados (prettier ya normalizaba). Bonus hallado en la propia E2E: la UI ofrece `date`/`date[]` y se emitían tal cual (TS inválido `vence?: date`) → ahora `Date`/`Date[]`. E2E: EtiquetaDto con opcionales/esNulo/ejemplos tipados (`example: 3`, `false`, `'2026-01-01'`), prettier clean.
+
+### F4-C2 — 🔴→✅ Doble estándar de opcionalidad en modo `nuevo`: `@ApiPropertyOptional` sin import (TS2304) y `description: 'undefined'` (nuevo, detectado en la E2E del lote 11)
+- **Fichero**: `generadores/crear-dto.ts` (modo `nuevo`).
+- **Problema**: DOS lecturas de la opcionalidad inconsistentes en el mismo flujo — el switch de atributos usaba `atributo.nuloOpcional` con `default:` ⇒ un payload sin `nuloOpcional` (p. ej. `nulo: true`, formato del flujo de edición de entity) caía en atributo OPCIONAL, pero el check del import (`a?.nuloOpcional && a.nuloOpcional !== 'noNulo'`) lo trataba como REQUERIDO ⇒ fichero con `@ApiPropertyOptional` sin importarlo (TS2304). Adicionalmente `description: '${atributo.descripcion}'` emitía el literal `'undefined'` si el payload no traía descripción.
+- **Fix aplicado (lote 11)**: helper `opcionalidadDe()` unificado (acepta `nuloOpcional` del formulario nuevo-DTO Y `nulo:boolean` del flujo de entity) usado en el switch, en `esOpcionalSwagger` y en `tieneOpcionalNuevo`; `description` cae al nombre del atributo cuando no viene (o viene vacía).
+- ✅ **Estado**: CORREGIDO (lote 11). Nota: el commit de código del lote 11 usó provisionalmente la etiqueta "F7-C2" (colisiona con IDs de Función 7); el ID canónico es F4-C2.
 
 ### ✅ Cumple
 `!` en requeridos · `i18nValidationMessage('validation.*')` (claves existen en es/en) · imports sin duplicar en el caso requerido · index barrel con guard.
@@ -437,7 +449,7 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
 | 9 | Crear controller | ✅ CORREGIDA (lotes 1, 6 y 8) |
 | 10 | CRUD completo | ✅ CORREGIDA (lotes 6, 7 y 8) |
 
-**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Las decisiones de convención del propietario quedaron adoptadas en el lote 9 (F5-M2: sufijo `Id`; F3-m1: tabla plana + orderBy) y los menores cosméticos cerrados en el lote 10 (F4-m1, F5-m1, F6-C4). Solo queda SEC-1 (app password de Gmail en `.env.local`, acción del propietario) y la limpieza opcional de `lib/` (andamiaje CLI pre-API que solo usa `preguntaBase.js`).
+**10/10 funciones corregidas y verificadas E2E — sin pendientes automatizables.** Las decisiones de convención del propietario quedaron adoptadas en el lote 9 (F5-M2: sufijo `Id`; F3-m1: tabla plana + orderBy), los menores cosméticos cerrados en el lote 10 (F4-m1, F5-m1, F6-C4) y el lote 11 ejecutó la limpieza de ficheros muertos (59 ficheros) + dos bugs residuales cazados por su propia E2E (F1-C6, F4-C2). Solo queda SEC-1 (app password de Gmail en `.env.local`, acción del propietario). Observaciones menores documentadas: entities regulares de `crear-entidad` no pasan por prettier (cosmético, tsc limpio, igual desde el lote 9); `crear-entidad` no valida el `esquema` contra el `SchemaEnum` del proyecto destino (la UI siempre manda esquemas válidos vía `leer-esquemas`; un esquema inexistente produce una entity que el orquestador rechaza con rollback — comportamiento seguro).
 
 ## Decisiones del propietario — RESUELTAS (lote 9)
 
@@ -622,3 +634,20 @@ Pasa `dtoName` + `modo: 'crud'` a crear-dto (contrato correcto) · propaga `traz
   - **C) Modo nuevo (EtiquetaDto)**: opcionales/esNulo correctos, ejemplo del formulario usado solo si parsea (`3` sin comillas; `'no-parseable!'` de fecha cae al default `'2026-01-01'`), `vence?: Date` (antes TS inválido), prettier clean.
   - **D) tsc de la copia tras generar: 0 errores en src/**; prettier clean en todos los artefactos nuevos; tsc de nestool-web: 0 errores.
 - **Nota de entorno**: `next lint` fue ELIMINADO en Next 16 (`Invalid project directory: lint`); el arreglo real exige migrar a flat-config de ESLint 10 — queda documentado como pendiente opcional de tooling; la verificación autoritativa sigue siendo tsc + E2E.
+
+### Lote 11 — limpieza de ficheros muertos (59) + F1-C6 + F4-C2 — ✅ APLICADO Y VERIFICADO
+- **Limpieza (2687320)**: cada candidato verificado con 0 referencias reales ANTES de borrar (imports absolutos, relativos y cadenas transitivas):
+  - `lib/` era CLI: 18 ficheros (`controller/crud/dtos/entity/index/mapper/menu/repository/service` en `.js`+`.ts`); SOBREVIVE `lib/utils.ts` (la función `cn` de shadcn, 3+ consumidores).
+  - `styles/` completa (5) y `app/page.module.css` — 0 refs; vive `app/globals.css` (layout).
+  - `examples/` completa (6), `public/*.svg` del scaffold (5), `services/` completa (2), `stores/useApiPathStore.ts` (1).
+  - `localdb/entity/proyecto.entity.ts` (+ poda del barrel `localdb/entity/index.ts`) — su único consumidor era `services/` (muerto). `localdb` VIVE por `useRutaApi` (11 consumidores) → `ruta.entity` → `generic.repository` → `db` (Dexie).
+  - Components demo: `nav-projects`/`nav-user`/`team-switcher` (el sidebar NO los importa — nav propio con data hardcodeada), `examples/ComboboxExample`, y los barriles `components/index.ts` (solo comentarios) y `components/ui/index.ts` (todos importan directo `@/components/ui/x`).
+  - Hooks: `use-mobile.ts` (DUPLICADO exacto de `useMobile.ts`; el sidebar importa `@/hooks/useMobile`) y `useComboboxData.ts` (solo lo usaba ComboboxExample).
+  - Utilities muertos: `a-inicial-mayuscula` (lo usaba solo `quitar-seperador`, muerto), `format-snake-case` + `group-by` (solo barrel, sin consumidores de sus símbolos), `formatear-nombre` (0 refs), `quitar-seperador` (0 refs) + poda del barrel `utilities/index.ts` (vive por `formatEntityName`). CUIDADO metodológico: el primer grep dio falsos "0 refs" porque los ficheros se llaman `*.utility.ts` y los imports incluyen el sufijo — re-verificado con el nombre real.
+  - `next.config.js` (duplicado vacío de `next.config.ts`) y `.idea/` (IDE, añadida a `.gitignore`).
+  - CONSERVADOS (reportados): `.claude/` + `.agents/` (skills de desarrollo con IA — activas en el workflow, no código muerto), `skills-lock.json`, `package-lock.json` (lockfile npm oficial del repo).
+- **F1-C6 (b6ea889)**: la E2E de la limpieza destapó que `crear-entidad` emitía `fechaAlta?: date` (TS2552), `@Column` sin `type` y constructor `fechaAlta: date` con payloads `tipoDato:'date'` — el fix F4-m1 del lote 10 cubrió los DTOs pero no la rama de entities. Helper `tipoTsDe()` en entity-utils + uso en columna/constructor. Ver detalle en su sección.
+- **F4-C2 (b6ea889)**: la misma E2E destapó el doble estándar de opcionalidad del modo `nuevo` (import de `ApiPropertyOptional` condicionado a `nuloOpcional` que el payload del flujo entity no manda) + `description: 'undefined'`. Helper `opcionalidadDe()` + default de description. Ver detalle en su sección. La 1ª corrida del orquestador con estos bugs hizo ROLLBACK LIMPIO (motivo: errores de compilación en ficheros generados; restaurados 9, eliminados 9, 0 errores en el propio rollback) — segunda red de seguridad funcionando en producción.
+- **E2E (copia fresca /tmp/api-e2e-final de ca1da1e, `bun install` dentro)**: Banco (string requerido + date opcional) → entity con `type: "timestamp"` + `fechaAlta?: Date` + constructor `fechaAlta?: Date`; EtiquetaDto modo nuevo con `import { ApiProperty, ApiPropertyOptional }`, `description: 'vence'` (no `undefined`), `vence?: Date | null`; DTOs CRUD de Banco; mapper; nomenclador Estado. Orquestador Suscripcion (date requerido + string opcional + M:1 opcional a BancoEntity): `success:true`, **modo tsc**, registros 3/3, `erroresTocados:[]`, `rollback.ejecutado:false`, `preexistentesSrc:0`. tsc de la copia: **0 errores en src/** (baseline 24 en test/ intacto). Seed + main.ts wired. tsc de nestool-web: 0 errores; 8/8 páginas 200.
+- **Nota de entorno**: el sandbox sega procesos hijos al terminar cada llamada bash — el dev server (3001) solo sobrevive dentro de la llamada que lo arranca; la E2E se ejecutó en llamadas únicas "arrancar+probar+matar". Además: modo `transpile` del orquestador en una copia sin `node_modules/.bin/tsc` (install incompleto del montaje, no bug del generador) — repetida la E2E con copia bien instalada para obtener `modo: tsc`.
+- **Commits**: 2687320 (cleanup) + b6ea889 (F1-C6/F4-C2) pusheados y verificados con ls-remote (`942602e..b6ea889`). Los mensajes del commit de código usaron las etiquetas provisionales "F7-C1/F7-C2" (colisión con IDs existentes de Función 7); IDs canónicos: F1-C6 y F4-C2. Token solo transitorio en URL.
